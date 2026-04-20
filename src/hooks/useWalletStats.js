@@ -1,0 +1,150 @@
+// ============================================
+// FILE: hooks/useWalletStats.js
+// Hook for fetching wallet statistics
+// ============================================
+
+import { useState, useEffect, useCallback } from 'react';
+import { supabase } from '../lib/supabase';
+
+const PAGE_SIZE = 20;
+
+export function useWalletStats() {
+  const [customers, setCustomers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [page, setPage] = useState(1);
+  const [stats, setStats] = useState({
+    totalBalance: 0,
+    negativeCount: 0,
+    atRiskCount: 0,
+    healthyCount: 0,
+  });
+  const [filters, setFilters] = useState({
+    search: '',
+    riskLevel: 'all', // 'all' | 'negative' | 'low' | 'healthy'
+  });
+
+  const fetchWalletStats = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      // Fetch wallets with user info
+      const { data: wallets, error: walletsError } = await supabase
+        .from('wallets')
+        .select(`
+          *,
+          users!inner(full_name, phone_number),
+          subscriptions!left(status)
+        `);
+
+      if (walletsError) throw walletsError;
+
+      // Transform and filter
+      let transformedData = wallets?.map(wallet => {
+        const activeSubs = wallet.subscriptions?.filter(s => s.status === 'active') || [];
+        const balance = wallet.balance || 0;
+        
+        let riskLevel = 'healthy';
+        if (balance < 0) riskLevel = 'negative';
+        else if (balance < 200) riskLevel = 'low';
+
+        return {
+          id: wallet.user_id,
+          name: wallet.users?.full_name || 'Unknown',
+          phone: wallet.users?.phone_number,
+          balance,
+          riskLevel,
+          activeSubscriptions: activeSubs.length,
+          zone: 'Unknown', // Would need address lookup
+        };
+      }) || [];
+
+      // Apply filters
+      if (filters.search) {
+        transformedData = transformedData.filter(c => 
+          c.name.toLowerCase().includes(filters.search.toLowerCase())
+        );
+      }
+
+      if (filters.riskLevel !== 'all') {
+        transformedData = transformedData.filter(c => c.riskLevel === filters.riskLevel);
+      }
+
+      // Calculate stats
+      const totalBalance = transformedData.reduce((sum, c) => sum + c.balance, 0);
+      const negativeCount = transformedData.filter(c => c.balance < 0).length;
+      const atRiskCount = transformedData.filter(c => c.balance >= 0 && c.balance < 200).length;
+      const healthyCount = transformedData.filter(c => c.balance >= 200).length;
+
+      setStats({
+        totalBalance,
+        negativeCount,
+        atRiskCount,
+        healthyCount,
+      });
+
+      // Paginate
+      const from = (page - 1) * PAGE_SIZE;
+      const to = from + PAGE_SIZE;
+      setCustomers(transformedData.slice(from, to));
+    } catch (err) {
+      console.error('Error fetching wallet stats:', err);
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [page, filters]);
+
+  useEffect(() => {
+    fetchWalletStats();
+  }, [fetchWalletStats]);
+
+  const updateFilters = useCallback((newFilters) => {
+    setFilters(prev => ({ ...prev, ...newFilters }));
+    setPage(1);
+  }, []);
+
+  const goToPage = useCallback((newPage) => {
+    setPage(newPage);
+  }, []);
+
+  const addCredit = useCallback(async (userId, amount) => {
+    try {
+      // Get current balance
+      const { data: wallet } = await supabase
+        .from('wallets')
+        .select('balance')
+        .eq('user_id', userId)
+        .single();
+
+      const newBalance = (wallet?.balance || 0) + amount;
+
+      const { error } = await supabase
+        .from('wallets')
+        .update({ balance: newBalance })
+        .eq('user_id', userId);
+
+      if (error) throw error;
+
+      await fetchWalletStats();
+      return { success: true };
+    } catch (err) {
+      console.error('Error adding credit:', err);
+      return { success: false, error: err.message };
+    }
+  }, [fetchWalletStats]);
+
+  return {
+    customers,
+    stats,
+    loading,
+    error,
+    page,
+    filters,
+    updateFilters,
+    goToPage,
+    addCredit,
+    refresh: fetchWalletStats,
+  };
+}
