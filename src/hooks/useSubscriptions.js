@@ -89,14 +89,28 @@ export function useSubscriptions() {
     fetchSubscriptions();
   }, [fetchSubscriptions]);
 
-  const updateSubscriptionStatus = useCallback(async (id, newStatus) => {
+  const updateSubscriptionStatus = useCallback(async (id, newStatus, holdData = null) => {
     try {
-      const { error } = await supabase
-        .from('subscriptions')
-        .update({ status: newStatus })
-        .eq('id', id);
+      if (newStatus === 'paused' && holdData) {
+        // Create a subscription hold
+        const { error } = await supabase
+          .from('subscription_holds')
+          .insert({
+            subscription_id: id,
+            start_date: holdData.start_date,
+            end_date: holdData.end_date,
+            reason: holdData.reason || 'Admin hold',
+          });
 
-      if (error) throw error;
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from('subscriptions')
+          .update({ status: newStatus })
+          .eq('id', id);
+
+        if (error) throw error;
+      }
 
       // Refresh data
       await fetchSubscriptions();

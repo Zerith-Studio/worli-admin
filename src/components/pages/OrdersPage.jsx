@@ -20,18 +20,22 @@ const STATUSES = [
 ];
 
 export function OrdersPage() {
-  const {
-    orders,
-    loading,
-    error,
-    filters,
-    updateFilters,
+  const { 
+    orders, 
+    loading, 
+    error, 
+    filters, 
+    updateFilters, 
     updateOrderStatus,
+    updateOrderNotes,
+    reassignDriver,
     refresh,
   } = useOrders();
 
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [failModal, setFailModal] = useState(null);
+  const [notesModal, setNotesModal] = useState(null);
+  const [noteForm, setNoteForm] = useState({ delivery_notes: '' });
 
   useDataRefresh(refresh, 60000, true);
 
@@ -179,7 +183,7 @@ export function OrdersPage() {
         </Drawer>
       )}
 
-      {failModal && (
+{failModal && (
         <Modal
           title="Delivery Failure — Action Required"
           onClose={() => setFailModal(null)}
@@ -212,10 +216,42 @@ export function OrdersPage() {
           </div>
           <div className="form-group">
             <label className="form-label">Driver Notes</label>
-            <textarea 
-              className="form-input" 
-              style={{ height: 70, paddingTop: 8 }} 
-              placeholder="Add notes for retry driver..." 
+            <textarea
+              className="form-input"
+              style={{ height: 70, paddingTop: 8 }}
+              placeholder="Add notes for retry driver..."
+            />
+          </div>
+        </Modal>
+      )}
+
+      {notesModal && (
+        <Modal
+          title={`Add Notes - ${notesModal.customerName}`}
+          onClose={() => setNotesModal(null)}
+          footer={
+            <>
+              <Button onClick={() => setNotesModal(null)}>Cancel</Button>
+              <Button variant="primary" onClick={() => {
+                updateOrderNotes(notesModal.id, noteForm.delivery_notes);
+                setNotesModal(null);
+                setNoteForm({ delivery_notes: '' });
+              }}>Save Notes</Button>
+            </>
+          }
+        >
+          <div className="form-group">
+            <label className="form-label">Order</label>
+            <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--text)' }}>{notesModal.orderNumber}</div>
+          </div>
+          <div className="form-group">
+            <label className="form-label">Delivery Notes</label>
+            <textarea
+              className="form-input"
+              style={{ height: 100, paddingTop: 8 }}
+              placeholder="Add delivery instructions or notes..."
+              value={noteForm.delivery_notes}
+              onChange={(e) => setNoteForm(prev => ({ ...prev, delivery_notes: e.target.value }))}
             />
           </div>
         </Modal>

@@ -8,7 +8,6 @@ export { CustomersPage } from './CustomersPage';
 export { SubscriptionsPage } from './SubscriptionsPage';
 export { OrdersPage } from './OrdersPage';
 export { DeliverySchedulePage } from './DeliverySchedulePage';
-export { InventoryPage } from './InventoryPage';
 export { DemandForecastPage } from './DemandForecastPage';
 export { RoutesPage } from './RoutesPage';
 export { DriversPage } from './DriversPage';

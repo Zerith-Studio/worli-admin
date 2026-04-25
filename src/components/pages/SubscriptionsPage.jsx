@@ -37,13 +37,30 @@ export function SubscriptionsPage() {
   } = useSubscriptions();
 
   const [selectedSub, setSelectedSub] = useState(null);
-  const [overrideModal, setOverrideModal] = useState(null);
+  const [pauseModal, setPauseModal] = useState(null);
+  const [holdDates, setHoldDates] = useState({ start: '', end: '', reason: '' });
 
   useDataRefresh(refresh, 60000, true);
 
   const handleToggleStatus = async (sub) => {
-    const newStatus = sub.status === 'active' ? 'paused' : 'active';
-    await updateSubscriptionStatus(sub.id, newStatus);
+    if (sub.status === 'active') {
+      setPauseModal(sub);
+    } else {
+      await updateSubscriptionStatus(sub.id, 'active');
+    }
+  };
+
+  const handleApplyHold = async () => {
+    if (!pauseModal || !holdDates.start || !holdDates.end) return;
+    
+    await updateSubscriptionStatus(pauseModal.id, 'paused', {
+      start_date: holdDates.start,
+      end_date: holdDates.end,
+      reason: holdDates.reason
+    });
+    
+    setPauseModal(null);
+    setHoldDates({ start: '', end: '', reason: '' });
   };
 
   if (loading && subscriptions.length === 0) {
@@ -102,7 +119,7 @@ export function SubscriptionsPage() {
                 <th>Price/day</th>
                 <th>Zone</th>
                 <th>Status</th>
-                <th>Override</th>
+                  <th>Hold</th>
                 <th>Actions</th>
               </tr>
             </thead>
@@ -117,8 +134,8 @@ export function SubscriptionsPage() {
                   <td style={{ fontSize: 11.5, color: "var(--text-3)" }}>{s.zone}</td>
                   <td><StatusBadge status={s.status} /></td>
                   <td>
-                    {s.override ? (
-                      <span className="badge badge-yellow">Override Active</span>
+                    {s.isPaused ? (
+                      <span className="badge badge-yellow">Hold Active</span>
                     ) : (
                       <span style={{ color: "var(--text-4)", fontSize: 11.5 }}>—</span>
                     )}
@@ -132,13 +149,6 @@ export function SubscriptionsPage() {
                         onClick={() => handleToggleStatus(s)}
                       >
                         {s.status === "active" ? "Pause" : "Resume"}
-                      </Button>
-                      <Button 
-                        size="sm" 
-                        style={{ color: "var(--blue)" }}
-                        onClick={() => setOverrideModal(s)}
-                      >
-                        Override
                       </Button>
                     </div>
                   </td>
@@ -198,41 +208,47 @@ export function SubscriptionsPage() {
         </Drawer>
       )}
 
-      {overrideModal && (
+      {pauseModal && (
         <Modal
-          title={`Subscription Override — ${overrideModal.customerName}`}
-          onClose={() => setOverrideModal(null)}
+          title={`Pause Subscription — ${pauseModal.customerName}`}
+          onClose={() => setPauseModal(null)}
           footer={
             <>
-              <Button onClick={() => setOverrideModal(null)}>Cancel</Button>
-              <Button variant="primary" onClick={() => setOverrideModal(null)}>Apply Override</Button>
+              <Button onClick={() => setPauseModal(null)}>Cancel</Button>
+              <Button variant="primary" onClick={handleApplyHold}>Apply Hold</Button>
             </>
           }
         >
           <div style={{ fontSize: 12, color: "var(--text-3)", marginBottom: 14, padding: "8px 12px", background: "var(--blue-bg)", borderRadius: 7 }}>
-            Override temporarily changes this subscription for a date range without cancelling it.
+            This will create a subscription hold for the specified date range. No deliveries will be scheduled during this period.
           </div>
           <div className="form-group">
             <label className="form-label">From Date</label>
-            <input type="date" className="form-input" defaultValue={new Date().toISOString().split('T')[0]} />
+            <input 
+              type="date" 
+              className="form-input" 
+              value={holdDates.start}
+              onChange={(e) => setHoldDates(prev => ({ ...prev, start: e.target.value }))}
+            />
           </div>
           <div className="form-group">
             <label className="form-label">To Date</label>
-            <input type="date" className="form-input" />
-          </div>
-          <div className="form-group">
-            <label className="form-label">Override Product (leave blank to keep same)</label>
-            <select className="form-select">
-              <option value="">— Keep current product —</option>
-            </select>
-          </div>
-          <div className="form-group">
-            <label className="form-label">Override Quantity</label>
-            <input type="number" className="form-input" placeholder="Leave blank to keep same" min={0} max={10} />
+            <input 
+              type="date" 
+              className="form-input"
+              value={holdDates.end}
+              onChange={(e) => setHoldDates(prev => ({ ...prev, end: e.target.value }))}
+            />
           </div>
           <div className="form-group">
             <label className="form-label">Reason</label>
-            <input type="text" className="form-input" placeholder="e.g. Customer travelling, Guest arriving..." />
+            <input 
+              type="text" 
+              className="form-input" 
+              placeholder="e.g. Customer travelling, Guest arriving..."
+              value={holdDates.reason}
+              onChange={(e) => setHoldDates(prev => ({ ...prev, reason: e.target.value }))}
+            />
           </div>
         </Modal>
       )}

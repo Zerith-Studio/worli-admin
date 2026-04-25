@@ -25,14 +25,13 @@ export function DashboardPage({ onNav }) {
     lowBalanceCount,
     deliveryPct,
     zoneStats,
+    weekData,
     loading,
     error,
     refresh,
   } = useDashboardStats();
 
   useDataRefresh(refresh, 60000, true);
-
-  const weekData = [42, 38, 51, 47, 55, 44, todayDelivered];
 
   if (loading) {
     return (
@@ -121,32 +120,7 @@ export function DashboardPage({ onNav }) {
         </div>
       </div>
 
-      <div className="grid-2">
-        <div className="card">
-          <div className="card-title">Inventory Overview</div>
-          <div className="alert-item" style={{ background: "var(--blue-bg)", marginBottom: 12 }}>
-            <div className="alert-icon">ℹ</div>
-            <div className="alert-text">
-              <strong>View full inventory details</strong>
-              Go to Inventory page for complete stock information
-            </div>
-          </div>
-          <div style={{ display: "flex", justifyContent: "space-between", padding: "12px", background: "var(--bg)", borderRadius: 8 }}>
-            <div style={{ textAlign: "center" }}>
-              <div style={{ fontSize: 11, color: "var(--text-3)" }}>Stock Status</div>
-              <div style={{ fontSize: 18, fontWeight: 600, color: "var(--green)" }}>Good</div>
-            </div>
-            <div style={{ textAlign: "center" }}>
-              <div style={{ fontSize: 11, color: "var(--text-3)" }}>Buffer</div>
-              <div style={{ fontSize: 18, fontWeight: 600 }}>10%</div>
-            </div>
-            <div style={{ textAlign: "center" }}>
-              <div style={{ fontSize: 11, color: "var(--text-3)" }}>Products</div>
-              <div style={{ fontSize: 18, fontWeight: 600 }}>6</div>
-            </div>
-          </div>
-        </div>
-
+      <div style={{ marginTop: '16px' }}>
         <div className="card">
           <div className="card-title">🚨 Alerts</div>
           <div className="scroll-fade">

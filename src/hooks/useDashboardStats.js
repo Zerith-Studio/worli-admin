@@ -22,6 +22,7 @@ export function useDashboardStats() {
     lowBalanceCount: 0,
     deliveryPct: 0,
     zoneStats: [],
+    weekData: [],
     loading: true,
     error: null,
   });
@@ -81,25 +82,63 @@ export function useDashboardStats() {
 
       if (pausedError) throw pausedError;
 
-      // Fetch zone stats (requires addresses with zones)
-      const { data: addressesData, error: addrError } = await supabase
-        .from('addresses')
-        .select('city');
+      // Fetch zone stats (requires orders joined with addresses)
+      const { data: zoneOrdersData, error: zoneError } = await supabase
+        .from('orders')
+        .select(`
+          status,
+          addresses!inner (
+            city
+          )
+        `)
+        .eq('delivery_date', TODAY);
 
-      if (addrError) throw addrError;
+      if (zoneError) throw zoneError;
 
       // Group by city/zone
       const zoneMap = {};
-      addressesData?.forEach(addr => {
-        const zone = addr.city || 'Unknown';
-        zoneMap[zone] = (zoneMap[zone] || 0) + 1;
+      zoneOrdersData?.forEach(order => {
+        const zone = order.addresses?.city || 'Unknown';
+        if (!zoneMap[zone]) {
+          zoneMap[zone] = { total: 0, done: 0 };
+        }
+        zoneMap[zone].total += 1;
+        if (order.status === 'delivered') {
+          zoneMap[zone].done += 1;
+        }
       });
 
-      const zoneStats = Object.entries(zoneMap).map(([zone, count]) => ({
+      const zoneStats = Object.entries(zoneMap).map(([zone, stats]) => ({
         zone,
-        total: count,
-        done: Math.round(count * 0.7), // Mock for now
+        total: stats.total,
+        done: stats.done,
       }));
+
+      // Fetch week data (last 7 days delivered orders)
+      const weekDates = Array.from({length: 7}, (_, i) => {
+        const d = new Date();
+        d.setDate(d.getDate() - (6 - i));
+        return d.toISOString().split('T')[0];
+      });
+
+      const { data: weekOrders, error: weekError } = await supabase
+        .from('orders')
+        .select('delivery_date')
+        .eq('status', 'delivered')
+        .gte('delivery_date', weekDates[0])
+        .lte('delivery_date', weekDates[6]);
+        
+      if (weekError) throw weekError;
+
+      const weekMap = {};
+      weekDates.forEach(d => weekMap[d] = 0);
+      weekOrders?.forEach(o => {
+        if (weekMap[o.delivery_date] !== undefined) {
+          weekMap[o.delivery_date] += 1;
+        }
+      });
+      
+      const weekData = weekDates.map(d => weekMap[d]);
 
       setStats({
         totalCustomers: totalCustomers || 0,
@@ -114,6 +153,7 @@ export function useDashboardStats() {
         lowBalanceCount,
         deliveryPct,
         zoneStats,
+        weekData,
         loading: false,
         error: null,
       });

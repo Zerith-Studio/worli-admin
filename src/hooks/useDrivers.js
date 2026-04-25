@@ -16,29 +16,49 @@ export function useDrivers() {
       setLoading(true);
       setError(null);
 
-      const { data, error: fetchError } = await supabase
+      // Get all riders
+      const { data: ridersData, error: ridersError } = await supabase
         .from('riders')
         .select(`
           *,
-          users!inner(phone_number),
           hubs(name)
         `);
 
-      if (fetchError) throw fetchError;
+      if (ridersError) throw ridersError;
+
+      // Get users data for phone numbers
+      const riderIds = ridersData?.map(r => r.id) || [];
+      let usersMap = {};
+      
+      if (riderIds.length > 0) {
+        const { data: usersData, error: usersError } = await supabase
+          .from('users')
+          .select('id, phone_number, full_name')
+          .in('id', riderIds);
+        
+        if (!usersError && usersData) {
+          usersData.forEach(u => {
+            usersMap[u.id] = u;
+          });
+        }
+      }
 
       // Transform data
-      const transformedData = data?.map(rider => ({
-        id: rider.id,
-        name: rider.full_name || 'Unnamed',
-        phone: rider.users?.phone_number,
-        zone: rider.hubs?.name || 'Unassigned',
-        status: rider.status || 'active',
-        vehicle: rider.vehicle_info || 'Unknown',
-        rating: rider.rating || 5.0,
-        deliveries: rider.total_deliveries || 0,
-        isVerified: rider.is_verified || false,
-        hubId: rider.hub_id,
-      })) || [];
+      const transformedData = ridersData?.map(rider => {
+        const userData = usersMap[rider.id];
+        return {
+          id: rider.id,
+          name: rider.full_name || userData?.full_name || 'Unnamed',
+          phone: rider.phone_number || userData?.phone_number || 'N/A',
+          zone: rider.hubs?.name || 'Unassigned',
+          status: rider.status || 'active',
+          vehicle: rider.vehicle_info || 'Unknown',
+          rating: rider.rating || 5.0,
+          deliveries: rider.total_deliveries || 0,
+          isVerified: rider.is_verified || false,
+          hubId: rider.hub_id,
+        };
+      }) || [];
 
       setDrivers(transformedData);
     } catch (err) {

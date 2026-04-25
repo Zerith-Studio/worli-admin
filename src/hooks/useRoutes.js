@@ -16,34 +16,71 @@ export function useRoutes() {
       setLoading(true);
       setError(null);
 
-      const { data, error: fetchError } = await supabase
+      // Fetch routes with hub info
+      const { data: routesData, error: routesError } = await supabase
         .from('routes')
         .select(`
           *,
-          hubs(name),
-          rider_routes!left(
-            rider_id,
-            riders!inner(
-              full_name
-            )
-          )
+          hubs(name)
         `);
 
-      if (fetchError) throw fetchError;
+      if (routesError) throw routesError;
+
+      // Fetch today's rider assignments with user info
+      const today = new Date().toISOString().split('T')[0];
+      const { data: riderRoutesData, error: rrError } = await supabase
+        .from('rider_routes')
+        .select(`
+          route_id,
+          rider_id
+        `)
+        .eq('assigned_date', today);
+
+      if (rrError) throw rrError;
+
+      // Get rider IDs that have assignments
+      const riderIds = [...new Set(riderRoutesData?.map(rr => rr.rider_id) || [])];
+      
+      // Fetch users data for those riders (riders.id = users.id)
+      let usersMap = {};
+      if (riderIds.length > 0) {
+        const { data: usersData, error: usersError } = await supabase
+          .from('users')
+          .select('id, full_name, phone_number')
+          .in('id', riderIds);
+        
+        if (!usersError && usersData) {
+          usersData.forEach(u => {
+            usersMap[u.id] = u;
+          });
+        }
+      }
+
+      // Create a map of route_id to rider info
+      const riderMap = {};
+      riderRoutesData?.forEach(rr => {
+        const userData = usersMap[rr.rider_id];
+        riderMap[rr.route_id] = {
+          rider_id: rr.rider_id,
+          full_name: userData?.full_name || 'Unassigned',
+          phone_number: userData?.phone_number,
+        };
+      });
 
       // Transform data
-      const transformedData = data?.map(route => {
-        const assignedRider = route.rider_routes?.[0]?.riders;
-        
+      const transformedData = routesData?.map(route => {
+        const assignedRider = riderMap[route.id];
+
         return {
           id: route.id,
           name: route.name,
           zone: route.hubs?.name || 'Unknown',
           hubId: route.hub_id,
-          driverId: route.rider_routes?.[0]?.rider_id,
-          driverName: assignedRider?.full_name,
+          driverId: assignedRider?.rider_id,
+          driverName: assignedRider?.full_name || 'Unassigned',
+          driverPhone: assignedRider?.phone_number,
           stops: 0, // Would need to count addresses
-          status: 'pending', // TODO: Calculate based on orders
+          status: assignedRider ? 'assigned' : 'pending',
           description: route.description,
           isActive: route.is_active,
         };

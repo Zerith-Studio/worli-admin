@@ -12,7 +12,6 @@ import {
   SubscriptionsPage,
   OrdersPage,
   DeliverySchedulePage,
-  InventoryPage,
   DemandForecastPage,
   RoutesPage,
   DriversPage,
@@ -26,7 +25,7 @@ import './styles/index.css';
 
 function AppContent() {
   const [currentPage, setCurrentPage] = useState('dashboard');
-  const { user, isAdmin, logout } = useAuth();
+  const { user, isAdmin, loading, logout } = useAuth();
 
   // Calculate badge counts for nav items
   const navItemsWithBadges = useMemo(() => {
@@ -68,8 +67,6 @@ function AppContent() {
         return <OrdersPage />;
       case 'schedule':
         return <DeliverySchedulePage />;
-      case 'inventory':
-        return <InventoryPage />;
       case 'forecast':
         return <DemandForecastPage />;
       case 'routes':
@@ -86,6 +83,15 @@ function AppContent() {
         return <DashboardPage onNav={setCurrentPage} />;
     }
   };
+
+  // If auth is still checking, show loading state
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', height: '100vh', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)' }}>
+        <div style={{ color: 'var(--text-3)', fontFamily: "'DM Mono', monospace" }}>Loading Operations Console...</div>
+      </div>
+    );
+  }
 
   // If not logged in, show login page
   if (!user) {

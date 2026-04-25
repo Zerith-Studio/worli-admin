@@ -32,6 +32,7 @@ export function WalletPage() {
   } = useWalletStats();
 
   const [creditModal, setCreditModal] = useState(null);
+  const [creditForm, setCreditForm] = useState({ amount: '', reason: '' });
 
   useDataRefresh(refresh, 60000, true);
 
@@ -154,7 +155,10 @@ export function WalletPage() {
                     </td>
                     <td>
                       <div style={{ display: "flex", gap: 4 }}>
-                        <Button size="sm" onClick={() => setCreditModal(c)}>Add Credit</Button>
+                        <Button size="sm" onClick={() => {
+                      setCreditModal(c);
+                      setCreditForm({ amount: '', reason: '' });
+                    }}>Add Credit</Button>
                         {risk !== "healthy" && <Button size="sm" style={{ color: "var(--yellow)" }}>Remind</Button>}
                       </div>
                     </td>
@@ -173,40 +177,48 @@ export function WalletPage() {
               <div className="modal-title">Add Credit - {creditModal.name}</div>
               <div className="drawer-close" style={{ marginLeft: "auto" }} onClick={() => setCreditModal(null)}>✕</div>
             </div>
-            <div className="modal-body">
-              <div className="form-group">
-                <label className="form-label">Current Balance</label>
-                <div style={{ fontSize: 18, fontWeight: 600, color: creditModal.balance < 0 ? 'var(--red)' : 'var(--green)' }}>
-                  ₹{creditModal.balance.toLocaleString()}
-                </div>
-              </div>
-              <div className="form-group">
-                <label className="form-label">Credit Amount</label>
-                <input 
-                  type="number" 
-                  className="form-input" 
-                  placeholder="Enter amount" 
-                  min="1"
-                />
-              </div>
-              <div className="form-group">
-                <label className="form-label">Reason</label>
-                <input 
-                  type="text" 
-                  className="form-input" 
-                  placeholder="e.g., Refund, Manual credit..." 
-                />
-              </div>
+        <div className="modal-body">
+          <div className="form-group">
+            <label className="form-label">Current Balance</label>
+            <div style={{ fontSize: 18, fontWeight: 600, color: creditModal.balance < 0 ? 'var(--red)' : 'var(--green)' }}>
+              ₹{creditModal.balance.toLocaleString()}
             </div>
-            <div className="modal-footer">
-              <Button onClick={() => setCreditModal(null)}>Cancel</Button>
-              <Button variant="primary" onClick={() => {
-                addCredit(creditModal.id, 100);
-                setCreditModal(null);
-              }}>
-                Add Credit
-              </Button>
-            </div>
+          </div>
+          <div className="form-group">
+            <label className="form-label">Credit Amount</label>
+            <input
+              type="number"
+              className="form-input"
+              placeholder="Enter amount"
+              min="1"
+              value={creditForm.amount}
+              onChange={(e) => setCreditForm(prev => ({ ...prev, amount: e.target.value }))}
+            />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Reason</label>
+            <input
+              type="text"
+              className="form-input"
+              placeholder="e.g., Refund, Manual credit..."
+              value={creditForm.reason}
+              onChange={(e) => setCreditForm(prev => ({ ...prev, reason: e.target.value }))}
+            />
+          </div>
+        </div>
+        <div className="modal-footer">
+          <Button onClick={() => setCreditModal(null)}>Cancel</Button>
+          <Button variant="primary" onClick={() => {
+            const amount = parseFloat(creditForm.amount);
+            if (amount > 0) {
+              addCredit(creditModal.id, amount, creditForm.reason || 'Manual credit');
+              setCreditModal(null);
+              setCreditForm({ amount: '', reason: '' });
+            }
+          }}>
+            Add Credit
+          </Button>
+        </div>
           </div>
         </div>
       )}

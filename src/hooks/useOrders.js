@@ -88,7 +88,7 @@ export function useOrders() {
 
   const updateOrderStatus = useCallback(async (id, newStatus, additionalData = {}) => {
     try {
-      const updateData = { 
+      const updateData = {
         status: newStatus,
         ...additionalData
       };
@@ -108,6 +108,40 @@ export function useOrders() {
       return { success: true };
     } catch (err) {
       console.error('Error updating order:', err);
+      return { success: false, error: err.message };
+    }
+  }, [fetchOrders]);
+
+  const updateOrderNotes = useCallback(async (id, notes) => {
+    try {
+      const { error } = await supabase
+        .from('orders')
+        .update({ delivery_notes: notes })
+        .eq('id', id);
+
+      if (error) throw error;
+
+      await fetchOrders();
+      return { success: true };
+    } catch (err) {
+      console.error('Error updating order notes:', err);
+      return { success: false, error: err.message };
+    }
+  }, [fetchOrders]);
+
+  const reassignDriver = useCallback(async (id, riderId) => {
+    try {
+      const { error } = await supabase
+        .from('orders')
+        .update({ rider_id: riderId })
+        .eq('id', id);
+
+      if (error) throw error;
+
+      await fetchOrders();
+      return { success: true };
+    } catch (err) {
+      console.error('Error reassigning driver:', err);
       return { success: false, error: err.message };
     }
   }, [fetchOrders]);
@@ -134,6 +168,8 @@ export function useOrders() {
     updateFilters,
     goToPage,
     updateOrderStatus,
+    updateOrderNotes,
+    reassignDriver,
     refresh: fetchOrders,
   };
 }

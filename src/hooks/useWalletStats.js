@@ -34,17 +34,29 @@ export function useWalletStats() {
         .from('wallets')
         .select(`
           *,
-          users!inner(full_name, phone_number),
-          subscriptions!left(status)
+          users!inner(full_name, phone_number)
         `);
 
       if (walletsError) throw walletsError;
 
+      // Fetch active subscriptions count per user
+      const { data: subscriptions, error: subsError } = await supabase
+        .from('subscriptions')
+        .select('user_id, status')
+        .eq('status', 'active');
+
+      if (subsError) throw subsError;
+
+      // Count active subscriptions per user
+      const activeSubsCount = {};
+      subscriptions?.forEach(sub => {
+        activeSubsCount[sub.user_id] = (activeSubsCount[sub.user_id] || 0) + 1;
+      });
+
       // Transform and filter
       let transformedData = wallets?.map(wallet => {
-        const activeSubs = wallet.subscriptions?.filter(s => s.status === 'active') || [];
         const balance = wallet.balance || 0;
-        
+
         let riskLevel = 'healthy';
         if (balance < 0) riskLevel = 'negative';
         else if (balance < 200) riskLevel = 'low';
@@ -55,7 +67,7 @@ export function useWalletStats() {
           phone: wallet.users?.phone_number,
           balance,
           riskLevel,
-          activeSubscriptions: activeSubs.length,
+          activeSubscriptions: activeSubsCount[wallet.user_id] || 0,
           zone: 'Unknown', // Would need address lookup
         };
       }) || [];
@@ -109,23 +121,45 @@ export function useWalletStats() {
     setPage(newPage);
   }, []);
 
-  const addCredit = useCallback(async (userId, amount) => {
+  const addCredit = useCallback(async (userId, amount, reason = 'Manual credit') => {
     try {
-      // Get current balance
-      const { data: wallet } = await supabase
+      // Get current wallet
+      const { data: wallet, error: walletError } = await supabase
         .from('wallets')
-        .select('balance')
+        .select('*')
         .eq('user_id', userId)
         .single();
 
-      const newBalance = (wallet?.balance || 0) + amount;
+      if (walletError) throw walletError;
 
-      const { error } = await supabase
+      const balanceBefore = wallet?.balance || 0;
+      const newBalance = balanceBefore + amount;
+
+      // Update wallet balance
+      const { error: updateError } = await supabase
         .from('wallets')
         .update({ balance: newBalance })
         .eq('user_id', userId);
 
-      if (error) throw error;
+      if (updateError) throw updateError;
+
+      // Create transaction record
+      const { error: txnError } = await supabase
+        .from('transactions')
+        .insert({
+          transaction_id: `ADM-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          user_id: userId,
+          wallet_id: wallet?.id,
+          type: 'credit',
+          amount: amount,
+          balance_before: balanceBefore,
+          balance_after: newBalance,
+          description: reason,
+          payment_method: 'admin_adjustment',
+          status: 'completed',
+        });
+
+      if (txnError) throw txnError;
 
       await fetchWalletStats();
       return { success: true };

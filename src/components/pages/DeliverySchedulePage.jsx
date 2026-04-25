@@ -5,31 +5,44 @@
 
 import React, { useState, useEffect } from 'react';
 import { useRoutes } from '../../hooks/useRoutes';
-import { useInventory } from '../../hooks/useInventory';
+import { useSettings } from '../../hooks/useSettings';
 import { Button } from '../ui/Button';
 import { ProgressBar } from '../ui/ProgressBar';
 
 export function DeliverySchedulePage() {
-  const [timeLeft, setTimeLeft] = useState("02:34:17");
+  const [timeLeft, setTimeLeft] = useState("00:00:00");
   const { routes } = useRoutes();
-  const { inventory } = useInventory();
+  const { getSetting, loading: settingsLoading } = useSettings();
+
+  const cutoffTimeSetting = getSetting('order_modification_cutoff_time', '19:00');
 
   useEffect(() => {
+    if (settingsLoading) return;
+
     const interval = setInterval(() => {
-      // Mock countdown - in real app calculate from cutoff time
-      setTimeLeft(prev => {
-        const [h, m, s] = prev.split(':').map(Number);
-        let total = h * 3600 + m * 60 + s - 1;
-        if (total <= 0) total = 0;
-        const newH = Math.floor(total / 3600);
-        const newM = Math.floor((total % 3600) / 60);
-        const newS = total % 60;
-        return `${String(newH).padStart(2, '0')}:${String(newM).padStart(2, '0')}:${String(newS).padStart(2, '0')}`;
-      });
+      const now = new Date();
+      const [hours, minutes] = cutoffTimeSetting.split(':').map(Number);
+      
+      const cutoffDate = new Date(now);
+      cutoffDate.setHours(hours, minutes, 0, 0);
+
+      // If we are past the cutoff, it's 0
+      let diffSeconds = Math.floor((cutoffDate - now) / 1000);
+      
+      if (diffSeconds <= 0) {
+        setTimeLeft("00:00:00");
+        clearInterval(interval);
+        return;
+      }
+
+      const h = Math.floor(diffSeconds / 3600);
+      const m = Math.floor((diffSeconds % 3600) / 60);
+      const s = diffSeconds % 60;
+      setTimeLeft(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`);
     }, 1000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [cutoffTimeSetting, settingsLoading]);
 
   const cutoffPassed = timeLeft === "00:00:00";
 
@@ -37,11 +50,18 @@ export function DeliverySchedulePage() {
   const scheduleByZone = routes.map(r => ({
     zone: r.zone,
     orders: Math.floor(Math.random() * 20) + 5,
-    products: inventory.slice(0, 3).map(p => ({
-      name: p.productName,
-      qty: Math.floor(Math.random() * 30) + 10,
-    })),
+    products: [
+      { name: "Fresh Milk 500ml", qty: Math.floor(Math.random() * 30) + 10 }
+    ],
   }));
+
+  const formatAMPM = (timeStr) => {
+    if (!timeStr) return "";
+    const [h, m] = timeStr.split(':').map(Number);
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    const hours = h % 12 || 12;
+    return `${hours}:${m.toString().padStart(2, '0')} ${ampm}`;
+  };
 
   return (
     <div>
@@ -54,7 +74,7 @@ export function DeliverySchedulePage() {
         <span style={{ fontSize: 13 }}>⏰</span>
         <span style={{ fontSize: 12, color: "var(--yellow)", fontWeight: 500 }}>Order cutoff in</span>
         <span className="cutoff-time">{timeLeft}</span>
-        <span style={{ fontSize: 12, color: "var(--text-3)" }}>— no changes after 10:00 PM</span>
+        <span style={{ fontSize: 12, color: "var(--text-3)" }}>— no changes after {formatAMPM(cutoffTimeSetting)}</span>
         {!cutoffPassed && <Button size="sm" style={{ marginLeft: "auto" }}>Extend Cutoff</Button>}
       </div>
 
