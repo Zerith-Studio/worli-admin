@@ -3,8 +3,8 @@
 // Authentication Context for Admin Dashboard
 // ============================================
 
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { supabase, checkIsAdminRPC } from '../lib/supabase';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
+import { supabase } from '../lib/supabase';
 
 const AuthContext = createContext(null);
 
@@ -15,15 +15,29 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  // Track whether the initial session check has completed.
+  // The onAuthStateChange listener fires an INITIAL_SESSION event at the same
+  // time as initSession runs, causing both to query the admins table in
+  // parallel and race to set loading=false. This ref prevents that.
+  const initDone = useRef(false);
+
   // Check admin status
   const checkAdminStatus = useCallback(async (userId) => {
     if (!userId) {
       setIsAdmin(false);
       return false;
     }
-    
+
     try {
-      const isAdminUser = await checkIsAdminRPC();
+      console.log('[AuthContext] querying admins table for id:', userId);
+      const { data, error } = await supabase
+        .from('admins')
+        .select('id')
+        .eq('id', userId)
+        .maybeSingle();
+
+      console.log('[AuthContext] admins query result:', { data, error });
+      const isAdminUser = !!data && !error;
       setIsAdmin(isAdminUser);
       return isAdminUser;
     } catch (err) {
@@ -36,30 +50,48 @@ export function AuthProvider({ children }) {
   // Initialize session
   useEffect(() => {
     const initSession = async () => {
+      console.log('[AuthContext] initSession called');
       try {
+        console.log('[AuthContext] getting session from supabase');
         const { data: { session: currentSession }, error: sessionError } = await supabase.auth.getSession();
-        
+        console.log('[AuthContext] getSession result:', { sessionFound: !!currentSession, error: sessionError });
+
         if (sessionError) {
           throw sessionError;
         }
 
         if (currentSession) {
+          console.log('[AuthContext] Setting session to state');
           setSession(currentSession);
           setUser(currentSession.user);
-          await checkAdminStatus(currentSession.user?.id);
+          console.log('[AuthContext] Checking admin status for user:', currentSession.user?.id);
+          const isAdm = await checkAdminStatus(currentSession.user?.id);
+          console.log('[AuthContext] Admin check done:', isAdm);
+        } else {
+          console.log('[AuthContext] No current session found.');
         }
       } catch (err) {
-        console.error('Session init error:', err);
+        console.error('[AuthContext] Session init error:', err);
         setError(err.message);
       } finally {
+        console.log('[AuthContext] initSession completed. setting loading false');
+        initDone.current = true;
         setLoading(false);
       }
     };
 
     initSession();
 
-    // Subscribe to auth changes
+    // Subscribe to auth changes.
+    // We skip processing the very first event if initSession has not yet
+    // finished — Supabase always fires INITIAL_SESSION synchronously, which
+    // would race with initSession and double-query the admins table.
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, newSession) => {
+      // Let initSession own the startup flow; only handle subsequent events.
+      if (!initDone.current) {
+        return;
+      }
+
       if (event === 'SIGNED_OUT' || !newSession) {
         setSession(null);
         setUser(null);
@@ -83,7 +115,7 @@ export function AuthProvider({ children }) {
   const sendOTP = async (phone) => {
     try {
       setError(null);
-      const { error: otpError } = await supabase.auth.signInWithOtp({ 
+      const { error: otpError } = await supabase.auth.signInWithOtp({
         phone
       });
 
@@ -116,7 +148,7 @@ export function AuthProvider({ children }) {
       if (data.user) {
         // Check if user is admin
         const isAdminUser = await checkAdminStatus(data.user.id);
-        
+
         if (!isAdminUser) {
           // Not an admin, sign out
           await supabase.auth.signOut();
