@@ -1,108 +1,129 @@
 // ============================================
 // FILE: components/pages/DeliverySchedulePage.jsx
-// Delivery Schedule Page Component
+// Removed: Lock Schedule button.
+// Real orders per route for tomorrow from DB.
 // ============================================
 
 import React, { useState, useEffect } from 'react';
-import { useRoutes } from '../../hooks/useRoutes';
+import { supabase } from '../../lib/supabase';
 import { useSettings } from '../../hooks/useSettings';
 import { Button } from '../ui/Button';
-import { ProgressBar } from '../ui/ProgressBar';
+import { LoadingSpinner } from '../ui/LoadingSpinner';
 
 export function DeliverySchedulePage() {
-  const [timeLeft, setTimeLeft] = useState("00:00:00");
-  const { routes } = useRoutes();
+  const [timeLeft, setTimeLeft] = useState('00:00:00');
+  const [scheduleData, setScheduleData] = useState([]);
+  const [scheduleLoading, setScheduleLoading] = useState(true);
   const { getSetting, loading: settingsLoading } = useSettings();
 
   const cutoffTimeSetting = getSetting('order_modification_cutoff_time', '19:00');
 
+  // Fetch real tomorrow's order counts per hub/route
+  useEffect(() => {
+    const fetchSchedule = async () => {
+      try {
+        setScheduleLoading(true);
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        const tomorrowStr = tomorrow.toISOString().split('T')[0];
+
+        const { data: orders } = await supabase
+          .from('orders')
+          .select('route_id, routes!left(name, hubs!left(name))')
+          .eq('delivery_date', tomorrowStr)
+          .eq('status', 'scheduled');
+
+        // Group by hub name
+        const grouped = {};
+        orders?.forEach(o => {
+          const hubName = o.routes?.hubs?.name || 'Unassigned Zone';
+          const routeName = o.routes?.name || 'Unknown Route';
+          const key = hubName;
+          if (!grouped[key]) grouped[key] = { zone: hubName, orders: 0 };
+          grouped[key].orders++;
+        });
+
+        setScheduleData(Object.values(grouped));
+      } catch (err) {
+        console.error('Error fetching schedule:', err);
+      } finally {
+        setScheduleLoading(false);
+      }
+    };
+    fetchSchedule();
+  }, []);
+
+  // Countdown timer to cutoff
   useEffect(() => {
     if (settingsLoading) return;
 
-    const interval = setInterval(() => {
+    const update = () => {
       const now = new Date();
       const [hours, minutes] = cutoffTimeSetting.split(':').map(Number);
-      
       const cutoffDate = new Date(now);
       cutoffDate.setHours(hours, minutes, 0, 0);
-
-      // If we are past the cutoff, it's 0
       let diffSeconds = Math.floor((cutoffDate - now) / 1000);
-      
-      if (diffSeconds <= 0) {
-        setTimeLeft("00:00:00");
-        clearInterval(interval);
-        return;
-      }
-
+      if (diffSeconds <= 0) { setTimeLeft('00:00:00'); return; }
       const h = Math.floor(diffSeconds / 3600);
       const m = Math.floor((diffSeconds % 3600) / 60);
       const s = diffSeconds % 60;
       setTimeLeft(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`);
-    }, 1000);
-
+    };
+    update();
+    const interval = setInterval(update, 1000);
     return () => clearInterval(interval);
   }, [cutoffTimeSetting, settingsLoading]);
 
-  const cutoffPassed = timeLeft === "00:00:00";
-
-  // Mock schedule data - in real app this would come from backend
-  const scheduleByZone = routes.map(r => ({
-    zone: r.zone,
-    orders: Math.floor(Math.random() * 20) + 5,
-    products: [
-      { name: "Fresh Milk 500ml", qty: Math.floor(Math.random() * 30) + 10 }
-    ],
-  }));
-
-  const formatAMPM = (timeStr) => {
-    if (!timeStr) return "";
+  const formatAMPM = timeStr => {
+    if (!timeStr) return '';
     const [h, m] = timeStr.split(':').map(Number);
-    const ampm = h >= 12 ? 'PM' : 'AM';
-    const hours = h % 12 || 12;
-    return `${hours}:${m.toString().padStart(2, '0')} ${ampm}`;
+    return `${h % 12 || 12}:${m.toString().padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`;
   };
+
+  const cutoffPassed = timeLeft === '00:00:00';
+  const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
+  const tomorrowLabel = tomorrow.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' });
 
   return (
     <div>
       <div className="page-header">
-        <div className="page-title">Delivery Schedule (T+1)</div>
-        <div className="page-sub">Planning for tomorrow's deliveries</div>
+        <div className="page-title">Delivery Schedule — Tomorrow</div>
+        <div className="page-sub">{tomorrowLabel}</div>
       </div>
 
       <div className="cutoff-timer">
         <span style={{ fontSize: 13 }}>⏰</span>
-        <span style={{ fontSize: 12, color: "var(--yellow)", fontWeight: 500 }}>Order cutoff in</span>
+        <span style={{ fontSize: 12, color: 'var(--yellow)', fontWeight: 500 }}>Order cutoff in</span>
         <span className="cutoff-time">{timeLeft}</span>
-        <span style={{ fontSize: 12, color: "var(--text-3)" }}>— no changes after {formatAMPM(cutoffTimeSetting)}</span>
-        {!cutoffPassed && <Button size="sm" style={{ marginLeft: "auto" }}>Extend Cutoff</Button>}
+        <span style={{ fontSize: 12, color: 'var(--text-3)' }}>— no changes after {formatAMPM(cutoffTimeSetting)}</span>
       </div>
 
-      <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+      <div style={{ marginBottom: 14 }}>
         <Button variant="primary">Generate Tomorrow's Orders</Button>
-        <Button>Lock Schedule</Button>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12 }}>
-        {scheduleByZone.map((z, idx) => (
-          <div key={idx} className="card">
-            <div className="card-title">
-              📍 {z.zone}
-              <span>{z.orders} orders</span>
-            </div>
-            {z.products.map(p => (
-              <div key={p.name} className="stat-row">
-                <div className="stat-label" style={{ fontSize: 12 }}>{p.name}</div>
-                <div style={{ fontFamily: "'DM Mono',monospace", fontSize: 12, fontWeight: 500 }}>{p.qty}L</div>
+      {scheduleLoading ? (
+        <div style={{ display: 'flex', justifyContent: 'center', padding: 40 }}><LoadingSpinner /></div>
+      ) : scheduleData.length === 0 ? (
+        <div className="card" style={{ textAlign: 'center', padding: 32, color: 'var(--text-4)' }}>
+          <div style={{ fontSize: 28, marginBottom: 8 }}>📅</div>
+          No orders scheduled for tomorrow yet.
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12 }}>
+          {scheduleData.map((z, idx) => (
+            <div key={idx} className="card">
+              <div className="card-title">
+                📍 {z.zone}
+                <span style={{ fontFamily: "'DM Mono',monospace" }}>{z.orders} orders</span>
               </div>
-            ))}
-            <div style={{ marginTop: 10, display: "flex", gap: 6 }}>
-              <Button size="sm">View Orders</Button>
-              <Button size="sm">Assign Driver</Button>
+              <div style={{ marginTop: 8, display: 'flex', gap: 6 }}>
+                <Button size="sm">View Orders</Button>
+              </div>
             </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

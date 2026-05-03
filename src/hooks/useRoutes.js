@@ -1,133 +1,151 @@
 // ============================================
 // FILE: hooks/useRoutes.js
-// Hook for fetching routes
+// Added createRoute, updateRoute, toggleRouteActive mutations.
+// Mounted guard added.
 // ============================================
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 
 export function useRoutes() {
   const [routes, setRoutes] = useState([]);
+  const [hubs, setHubs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   const fetchRoutes = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
 
-      // Fetch routes with hub info
+      // Fetch hubs for dropdowns
+      const { data: hubsData } = await supabase.from('hubs').select('id, name').eq('is_active', true).order('name');
+      if (mountedRef.current && hubsData) setHubs(hubsData);
+
       const { data: routesData, error: routesError } = await supabase
         .from('routes')
-        .select(`
-          *,
-          hubs(name)
-        `);
-
+        .select('*, hubs(name)');
       if (routesError) throw routesError;
 
-      // Fetch today's rider assignments with user info
+      // Fetch today's rider assignments
       const today = new Date().toISOString().split('T')[0];
-      const { data: riderRoutesData, error: rrError } = await supabase
+      const { data: riderRoutesData } = await supabase
         .from('rider_routes')
-        .select(`
-          route_id,
-          rider_id
-        `)
+        .select('route_id, rider_id')
         .eq('assigned_date', today);
 
-      if (rrError) throw rrError;
-
-      // Get rider IDs that have assignments
+      // Resolve rider names
       const riderIds = [...new Set(riderRoutesData?.map(rr => rr.rider_id) || [])];
-      
-      // Fetch users data for those riders (riders.id = users.id)
       let usersMap = {};
       if (riderIds.length > 0) {
-        const { data: usersData, error: usersError } = await supabase
-          .from('users')
-          .select('id, full_name, phone_number')
-          .in('id', riderIds);
-        
-        if (!usersError && usersData) {
-          usersData.forEach(u => {
-            usersMap[u.id] = u;
-          });
-        }
+        const { data: usersData } = await supabase
+          .from('users').select('id, full_name').in('id', riderIds);
+        usersData?.forEach(u => { usersMap[u.id] = u; });
       }
 
-      // Create a map of route_id to rider info
       const riderMap = {};
       riderRoutesData?.forEach(rr => {
-        const userData = usersMap[rr.rider_id];
         riderMap[rr.route_id] = {
           rider_id: rr.rider_id,
-          full_name: userData?.full_name || 'Unassigned',
-          phone_number: userData?.phone_number,
+          full_name: usersMap[rr.rider_id]?.full_name || 'Unassigned',
         };
       });
 
-      // Transform data
-      const transformedData = routesData?.map(route => {
-        const assignedRider = riderMap[route.id];
+      const transformedData = routesData?.map(route => ({
+        id: route.id,
+        name: route.name,
+        hubId: route.hub_id,
+        hubName: route.hubs?.name || 'No Hub',
+        description: route.description || '',
+        isActive: route.is_active,
+        driverId: riderMap[route.id]?.rider_id || null,
+        driverName: riderMap[route.id]?.full_name || 'Unassigned',
+      })) || [];
 
-        return {
-          id: route.id,
-          name: route.name,
-          zone: route.hubs?.name || 'Unknown',
-          hubId: route.hub_id,
-          driverId: assignedRider?.rider_id,
-          driverName: assignedRider?.full_name || 'Unassigned',
-          driverPhone: assignedRider?.phone_number,
-          stops: 0, // Would need to count addresses
-          status: assignedRider ? 'assigned' : 'pending',
-          description: route.description,
-          isActive: route.is_active,
-        };
-      }) || [];
-
+      if (!mountedRef.current) return;
       setRoutes(transformedData);
     } catch (err) {
       console.error('Error fetching routes:', err);
-      setError(err.message);
+      if (mountedRef.current) setError(err.message);
     } finally {
-      setLoading(false);
+      if (mountedRef.current) setLoading(false);
     }
   }, []);
 
-  useEffect(() => {
-    fetchRoutes();
+  useEffect(() => { fetchRoutes(); }, [fetchRoutes]);
+
+  const createRoute = useCallback(async ({ name, hub_id, description }) => {
+    try {
+      setSaving(true);
+      const { error } = await supabase.from('routes').insert({
+        name: name.trim(),
+        hub_id: hub_id || null,
+        description: description?.trim() || null,
+        is_active: true,
+      });
+      if (error) throw error;
+      await fetchRoutes();
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err.message };
+    } finally {
+      setSaving(false);
+    }
+  }, [fetchRoutes]);
+
+  const updateRoute = useCallback(async (id, { name, hub_id, description }) => {
+    try {
+      setSaving(true);
+      const { error } = await supabase.from('routes').update({
+        name: name.trim(),
+        hub_id: hub_id || null,
+        description: description?.trim() || null,
+      }).eq('id', id);
+      if (error) throw error;
+      await fetchRoutes();
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err.message };
+    } finally {
+      setSaving(false);
+    }
+  }, [fetchRoutes]);
+
+  const toggleRouteActive = useCallback(async (id, currentValue) => {
+    try {
+      const { error } = await supabase.from('routes').update({ is_active: !currentValue }).eq('id', id);
+      if (error) throw error;
+      await fetchRoutes();
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
   }, [fetchRoutes]);
 
   const assignDriver = useCallback(async (routeId, riderId) => {
     try {
-      // First, deactivate any existing assignments for this route today
       const today = new Date().toISOString().split('T')[0];
-      
-      // Insert new rider route assignment
-      const { error } = await supabase
-        .from('rider_routes')
-        .insert({
-          route_id: routeId,
-          rider_id: riderId,
-          assigned_date: today,
-        });
-
+      const { error } = await supabase.from('rider_routes').upsert({
+        route_id: routeId, rider_id: riderId, assigned_date: today,
+      }, { onConflict: 'rider_id,route_id,assigned_date' });
       if (error) throw error;
-
       await fetchRoutes();
       return { success: true };
     } catch (err) {
-      console.error('Error assigning driver:', err);
       return { success: false, error: err.message };
     }
   }, [fetchRoutes]);
 
   return {
-    routes,
-    loading,
-    error,
-    assignDriver,
+    routes, hubs, loading, error, saving,
+    createRoute, updateRoute, toggleRouteActive, assignDriver,
     refresh: fetchRoutes,
   };
 }

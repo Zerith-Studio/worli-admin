@@ -62,12 +62,12 @@ export function DashboardPage({ onNav }) {
         <div className="kpi-card">
           <div className="kpi-label">Total Customers</div>
           <div className="kpi-value">{totalCustomers.toLocaleString()}</div>
-          <div className="kpi-change kpi-up">↑ 3 this week</div>
+          <div className="kpi-change" style={{ color: 'var(--text-3)' }}>Registered users</div>
         </div>
         <div className="kpi-card">
           <div className="kpi-label">Active Subscriptions</div>
           <div className="kpi-value">{activeSubscriptions.toLocaleString()}</div>
-          <div className="kpi-change kpi-down">↓ 2 paused today</div>
+          <div className="kpi-change" style={{ color: 'var(--text-3)' }}>Currently active</div>
         </div>
         <div className="kpi-card">
           <div className="kpi-label">Today's Deliveries</div>
@@ -79,7 +79,7 @@ export function DashboardPage({ onNav }) {
         <div className="kpi-card">
           <div className="kpi-label">Today's Revenue</div>
           <div className="kpi-value">₹{todayRevenue.toLocaleString()}</div>
-          <div className="kpi-change kpi-up">↑ 8% vs yesterday</div>
+          <div className="kpi-change" style={{ color: 'var(--text-3)' }}>From delivered orders</div>
         </div>
       </div>
 
@@ -154,8 +154,8 @@ export function DashboardPage({ onNav }) {
             <div className="alert-item" style={{ background: "var(--yellow-bg)" }}>
               <div className="alert-icon">⏰</div>
               <div className="alert-text">
-                <strong>Order cutoff at 10:00 PM tonight</strong>
-                {activeSubscriptions} subscriptions locked after cutoff
+                <strong>Order modification cutoff active</strong>
+                {activeSubscriptions} subscriptions will be locked after tonight's cutoff
               </div>
             </div>
           </div>

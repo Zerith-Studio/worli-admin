@@ -1,16 +1,13 @@
-// ============================================
-// FILE: hooks/index.js
-// Hook exports
-// ============================================
-
-export { useDashboardStats } from './useDashboardStats';
+// hooks/index.js
 export { useCustomers } from './useCustomers';
 export { useSubscriptions } from './useSubscriptions';
 export { useOrders } from './useOrders';
-export { useRoutes } from './useRoutes';
+export { useDashboardStats } from './useDashboardStats';
 export { useDrivers } from './useDrivers';
-export { useInventory } from './useInventory';
+export { useRoutes } from './useRoutes';
+export { useHubs } from './useHubs';
 export { useWalletStats } from './useWalletStats';
-export { useAssets } from './useAssets';
 export { useSettings } from './useSettings';
+export { useAssets } from './useAssets';
 export { useDataRefresh } from './useDataRefresh';
+export { useBadgeCounts } from './useBadgeCounts';

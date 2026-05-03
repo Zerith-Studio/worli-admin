@@ -1,9 +1,10 @@
 // ============================================
 // FILE: hooks/useSubscriptions.js
-// Hook for fetching and managing subscriptions
+// Fixed: default status=active, working search via 2-step user
+// query, pagination, mounted guard.
 // ============================================
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 
 const PAGE_SIZE = 15;
@@ -17,52 +18,69 @@ export function useSubscriptions() {
   const [filters, setFilters] = useState({
     search: '',
     type: 'all',
-    status: 'all',
+    status: 'active', // default to active
   });
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   const fetchSubscriptions = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
 
+      // Search filter: PostgREST can't ilike on joined tables,
+      // so we resolve user IDs first.
+      let userIdFilter = null;
+      if (filters.search) {
+        const { data: matchedUsers } = await supabase
+          .from('users')
+          .select('id')
+          .or(`full_name.ilike.%${filters.search}%,phone_number.ilike.%${filters.search}%`);
+
+        userIdFilter = matchedUsers?.map(u => u.id) || [];
+        if (userIdFilter.length === 0) {
+          if (mountedRef.current) {
+            setSubscriptions([]);
+            setTotalCount(0);
+            setLoading(false);
+          }
+          return;
+        }
+      }
+
       let query = supabase
         .from('subscriptions')
         .select(`
           *,
-          users!inner(full_name),
+          users!inner(full_name, phone_number),
           products!inner(name, volume, price),
           addresses!left(city)
         `, { count: 'exact' });
 
-      // Apply filters
-      if (filters.type !== 'all') {
-        query = query.eq('frequency', filters.type);
-      }
-      
-      if (filters.status !== 'all') {
-        query = query.eq('status', filters.status);
-      }
+      if (filters.type !== 'all') query = query.eq('frequency', filters.type);
+      if (filters.status !== 'all') query = query.eq('status', filters.status);
+      if (userIdFilter !== null) query = query.in('user_id', userIdFilter);
 
-      if (filters.search) {
-        query = query.ilike('users.full_name', `%${filters.search}%`);
-      }
-
-      // Apply pagination
       const from = (page - 1) * PAGE_SIZE;
       const to = from + PAGE_SIZE - 1;
-      
+
       const { data, error: fetchError, count } = await query
         .range(from, to)
         .order('created_at', { ascending: false });
 
       if (fetchError) throw fetchError;
+      if (!mountedRef.current) return;
 
-      // Transform data
       const transformedData = data?.map(sub => ({
         id: sub.id,
         customerId: sub.user_id,
         customerName: sub.users?.full_name || 'Unknown',
-        zone: sub.addresses?.city || 'Unknown',
+        customerPhone: sub.users?.phone_number,
+        city: sub.addresses?.city || '—',
         productId: sub.product_id,
         productName: sub.products?.name || 'Unknown',
         productUnit: sub.products?.volume || '',
@@ -71,29 +89,28 @@ export function useSubscriptions() {
         status: sub.status || 'active',
         startDate: sub.start_date,
         price: (sub.products?.price || 0) * (sub.quantity || 1),
-        override: null, // TODO: Implement override logic
-        customDays: sub.custom_quantities ? Object.keys(sub.custom_quantities).map(Number) : null,
+        discountAmount: sub.discount_amount || 0,
+        remainingBottles: sub.remaining_bottles,
+        intervalDays: sub.interval_days,
+        pausedDates: sub.paused_dates || [],
       })) || [];
 
       setSubscriptions(transformedData);
       setTotalCount(count || 0);
     } catch (err) {
       console.error('Error fetching subscriptions:', err);
-      setError(err.message);
+      if (mountedRef.current) setError(err.message);
     } finally {
-      setLoading(false);
+      if (mountedRef.current) setLoading(false);
     }
   }, [page, filters]);
 
-  useEffect(() => {
-    fetchSubscriptions();
-  }, [fetchSubscriptions]);
+  useEffect(() => { fetchSubscriptions(); }, [fetchSubscriptions]);
 
   const updateSubscriptionStatus = useCallback(async (id, newStatus, holdData = null) => {
     try {
       if (newStatus === 'paused' && holdData) {
-        // Create a subscription hold
-        const { error } = await supabase
+        const { error: holdError } = await supabase
           .from('subscription_holds')
           .insert({
             subscription_id: id,
@@ -101,18 +118,16 @@ export function useSubscriptions() {
             end_date: holdData.end_date,
             reason: holdData.reason || 'Admin hold',
           });
-
-        if (error) throw error;
+        if (holdError) throw holdError;
+        // Update subscription status too
+        const { error: statusError } = await supabase
+          .from('subscriptions').update({ status: 'paused' }).eq('id', id);
+        if (statusError) throw statusError;
       } else {
         const { error } = await supabase
-          .from('subscriptions')
-          .update({ status: newStatus })
-          .eq('id', id);
-
+          .from('subscriptions').update({ status: newStatus }).eq('id', id);
         if (error) throw error;
       }
-
-      // Refresh data
       await fetchSubscriptions();
       return { success: true };
     } catch (err) {
@@ -126,23 +141,11 @@ export function useSubscriptions() {
     setPage(1);
   }, []);
 
-  const goToPage = useCallback((newPage) => {
-    setPage(newPage);
-  }, []);
-
+  const goToPage = useCallback((newPage) => { setPage(newPage); }, []);
   const totalPages = Math.ceil(totalCount / PAGE_SIZE);
 
   return {
-    subscriptions,
-    loading,
-    error,
-    page,
-    totalPages,
-    totalCount,
-    filters,
-    updateFilters,
-    goToPage,
-    updateSubscriptionStatus,
-    refresh: fetchSubscriptions,
+    subscriptions, loading, error, page, totalPages, totalCount,
+    filters, updateFilters, goToPage, updateSubscriptionStatus, refresh: fetchSubscriptions,
   };
 }

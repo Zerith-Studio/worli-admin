@@ -1,9 +1,9 @@
 // ============================================
 // FILE: hooks/useOrders.js
-// Hook for fetching and managing orders
+// Added mounted guard to prevent stale setState.
 // ============================================
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 
 const PAGE_SIZE = 20;
@@ -18,6 +18,12 @@ export function useOrders() {
     date: new Date().toISOString().split('T')[0],
     status: 'all',
   });
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   const fetchOrders = useCallback(async () => {
     try {
@@ -30,37 +36,30 @@ export function useOrders() {
           *,
           users!inner(full_name),
           products!inner(name, volume),
+          addresses!left(city),
           subscriptions!left(frequency)
         `, { count: 'exact' });
 
-      // Apply date filter
-      if (filters.date) {
-        query = query.eq('delivery_date', filters.date);
-      }
+      if (filters.date) query = query.eq('delivery_date', filters.date);
+      if (filters.status !== 'all') query = query.eq('status', filters.status);
 
-      // Apply status filter
-      if (filters.status !== 'all') {
-        query = query.eq('status', filters.status);
-      }
-
-      // Apply pagination
       const from = (page - 1) * PAGE_SIZE;
       const to = from + PAGE_SIZE - 1;
-      
+
       const { data, error: fetchError, count } = await query
         .range(from, to)
         .order('created_at', { ascending: false });
 
       if (fetchError) throw fetchError;
+      if (!mountedRef.current) return;
 
-      // Transform data
       const transformedData = data?.map(order => ({
         id: order.id,
         orderNumber: order.order_number,
         subscriptionId: order.subscription_id,
         customerId: order.user_id,
         customerName: order.users?.full_name || 'Unknown',
-        zone: 'Unknown', // Would need address lookup
+        city: order.addresses?.city || '—',
         productName: order.products?.name || 'Unknown',
         productUnit: order.products?.volume || '',
         quantity: order.quantity || 1,
@@ -70,78 +69,53 @@ export function useOrders() {
         failReason: order.failure_reason,
         riderId: order.rider_id,
         deliveredAt: order.delivered_at,
+        deliveryNotes: order.delivery_notes,
+        discountAmount: order.discount_amount || 0,
       })) || [];
 
       setOrders(transformedData);
       setTotalCount(count || 0);
     } catch (err) {
       console.error('Error fetching orders:', err);
-      setError(err.message);
+      if (mountedRef.current) setError(err.message);
     } finally {
-      setLoading(false);
+      if (mountedRef.current) setLoading(false);
     }
   }, [page, filters]);
 
-  useEffect(() => {
-    fetchOrders();
-  }, [fetchOrders]);
+  useEffect(() => { fetchOrders(); }, [fetchOrders]);
 
   const updateOrderStatus = useCallback(async (id, newStatus, additionalData = {}) => {
     try {
-      const updateData = {
-        status: newStatus,
-        ...additionalData
-      };
-
-      if (newStatus === 'delivered') {
-        updateData.delivered_at = new Date().toISOString();
-      }
-
-      const { error } = await supabase
-        .from('orders')
-        .update(updateData)
-        .eq('id', id);
-
+      const updateData = { status: newStatus, ...additionalData };
+      if (newStatus === 'delivered') updateData.delivered_at = new Date().toISOString();
+      const { error } = await supabase.from('orders').update(updateData).eq('id', id);
       if (error) throw error;
-
       await fetchOrders();
       return { success: true };
     } catch (err) {
-      console.error('Error updating order:', err);
       return { success: false, error: err.message };
     }
   }, [fetchOrders]);
 
   const updateOrderNotes = useCallback(async (id, notes) => {
     try {
-      const { error } = await supabase
-        .from('orders')
-        .update({ delivery_notes: notes })
-        .eq('id', id);
-
+      const { error } = await supabase.from('orders').update({ delivery_notes: notes }).eq('id', id);
       if (error) throw error;
-
       await fetchOrders();
       return { success: true };
     } catch (err) {
-      console.error('Error updating order notes:', err);
       return { success: false, error: err.message };
     }
   }, [fetchOrders]);
 
   const reassignDriver = useCallback(async (id, riderId) => {
     try {
-      const { error } = await supabase
-        .from('orders')
-        .update({ rider_id: riderId })
-        .eq('id', id);
-
+      const { error } = await supabase.from('orders').update({ rider_id: riderId }).eq('id', id);
       if (error) throw error;
-
       await fetchOrders();
       return { success: true };
     } catch (err) {
-      console.error('Error reassigning driver:', err);
       return { success: false, error: err.message };
     }
   }, [fetchOrders]);
@@ -151,25 +125,13 @@ export function useOrders() {
     setPage(1);
   }, []);
 
-  const goToPage = useCallback((newPage) => {
-    setPage(newPage);
-  }, []);
-
+  const goToPage = useCallback((newPage) => { setPage(newPage); }, []);
   const totalPages = Math.ceil(totalCount / PAGE_SIZE);
 
   return {
-    orders,
-    loading,
-    error,
-    page,
-    totalPages,
-    totalCount,
-    filters,
-    updateFilters,
-    goToPage,
-    updateOrderStatus,
-    updateOrderNotes,
-    reassignDriver,
+    orders, loading, error, page, totalPages, totalCount,
+    filters, updateFilters, goToPage,
+    updateOrderStatus, updateOrderNotes, reassignDriver,
     refresh: fetchOrders,
   };
 }
