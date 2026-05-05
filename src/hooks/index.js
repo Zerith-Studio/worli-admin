@@ -5,6 +5,7 @@ export { useOrders } from './useOrders';
 export { useDashboardStats } from './useDashboardStats';
 export { useDrivers } from './useDrivers';
 export { useRoutes } from './useRoutes';
+export { useRouteStops } from './useRouteStops';
 export { useHubs } from './useHubs';
 export { useWalletStats } from './useWalletStats';
 export { useSettings } from './useSettings';
