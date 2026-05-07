@@ -29,7 +29,7 @@ export function DeliverySchedulePage() {
 
         const { data: orders } = await supabase
           .from('orders')
-          .select('route_id, routes!left(name, hubs!left(name))')
+          .select('route_id, route_stop_id, routes!left(name, hubs!left(name))')
           .eq('delivery_date', tomorrowStr)
           .eq('status', 'scheduled');
 

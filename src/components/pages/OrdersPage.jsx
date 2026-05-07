@@ -91,7 +91,7 @@ export function OrdersPage() {
               <tr>
                 <th>Order ID</th>
                 <th>Customer</th>
-                <th>Zone</th>
+                <th>Stop</th>
                 <th>Product</th>
                 <th>Qty</th>
                 <th>Amount</th>
@@ -107,7 +107,7 @@ export function OrdersPage() {
                     {o.orderNumber}
                   </td>
                   <td style={{ fontWeight: 500 }}>{o.customerName}</td>
-                  <td style={{ fontSize: 11.5, color: "var(--text-3)" }}>{o.zone}</td>
+                  <td style={{ fontSize: 11.5, color: "var(--text-3)" }}>{o.stopName}</td>
                   <td>{o.productName} <span style={{ color: "var(--text-4)", fontSize: 11 }}>{o.productUnit}</span></td>
                   <td>×{o.quantity}</td>
                   <td style={{ fontFamily: "'DM Mono',monospace" }}>₹{o.amount}</td>
@@ -154,7 +154,7 @@ export function OrdersPage() {
               { label: "Product", val: `${selectedOrder.productName} (${selectedOrder.productUnit})` },
               { label: "Quantity", val: `×${selectedOrder.quantity}` },
               { label: "Amount", val: `₹${selectedOrder.amount}` },
-              { label: "Zone", val: selectedOrder.zone },
+              { label: "Stop", val: selectedOrder.stopName },
             ].map(r => (
               <div key={r.label} style={{ background: "var(--bg)", padding: "10px 12px", borderRadius: 7 }}>
                 <div style={{ fontSize: 11, color: "var(--text-3)", marginBottom: 3 }}>{r.label}</div>

@@ -37,7 +37,8 @@ export function useOrders() {
           users!inner(full_name),
           products!inner(name, volume),
           addresses!left(city),
-          subscriptions!left(frequency)
+          subscriptions!left(frequency),
+          route_stops!left(name)
         `, { count: 'exact' });
 
       if (filters.date) query = query.eq('delivery_date', filters.date);
@@ -68,6 +69,8 @@ export function useOrders() {
         date: order.delivery_date,
         failReason: order.failure_reason,
         riderId: order.rider_id,
+        routeStopId: order.route_stop_id,
+        stopName: order.route_stops?.name || '—',
         deliveredAt: order.delivered_at,
         deliveryNotes: order.delivery_notes,
         discountAmount: order.discount_amount || 0,
