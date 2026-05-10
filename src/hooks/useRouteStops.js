@@ -19,10 +19,10 @@ export function useRouteStops(routeId) {
     return () => { mountedRef.current = false; };
   }, []);
 
-  const fetchStops = useCallback(async () => {
+  const fetchStops = useCallback(async (isBackground = false) => {
     if (!routeId) { setStops([]); return; }
     try {
-      setLoading(true);
+      if (!isBackground) setLoading(true);
       setError(null);
       const { data, error: fetchError } = await supabase
         .from('route_stops')

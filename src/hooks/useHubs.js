@@ -18,9 +18,9 @@ export function useHubs() {
     return () => { mountedRef.current = false; };
   }, []);
 
-  const fetchHubs = useCallback(async () => {
+  const fetchHubs = useCallback(async (isBackground = false) => {
     try {
-      setLoading(true);
+      if (!isBackground) setLoading(true);
       setError(null);
 
       const { data, error: fetchError } = await supabase

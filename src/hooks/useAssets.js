@@ -19,9 +19,9 @@ export function useAssets() {
     highOverdue: 0,
   });
 
-  const fetchAssets = useCallback(async () => {
+  const fetchAssets = useCallback(async (isBackground = false) => {
     try {
-      setLoading(true);
+      if (!isBackground) setLoading(true);
       setError(null);
 
       // Fetch bottle returns

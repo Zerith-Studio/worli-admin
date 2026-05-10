@@ -36,12 +36,16 @@ export function useDashboardStats() {
     error: null,
   })
 
-  const fetchStats = useCallback(async () => {
+  const fetchStats = useCallback(async (isBackground = false) => {
     try {
       console.log(
         "[useDashboardStats] fetchStats started. Setting loading: true",
       )
-      setStats((prev) => ({ ...prev, loading: true, error: null }))
+      if (!isBackground) {
+        setStats((prev) => ({ ...prev, loading: true, error: null }))
+      } else {
+        setStats((prev) => ({ ...prev, error: null }))
+      }
 
       // Fetch total customers
       const { count: totalCustomers, error: customersError } = await supabase

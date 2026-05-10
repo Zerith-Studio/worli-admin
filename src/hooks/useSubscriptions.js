@@ -29,12 +29,12 @@ export function useSubscriptions() {
     }
   }, [])
 
-  const fetchSubscriptions = useCallback(async () => {
+  const fetchSubscriptions = useCallback(async (isBackground = false) => {
     try {
       console.log(
         `[useSubscriptions] fetch started. mounted=${mountedRef.current}`,
       )
-      setLoading(true)
+      if (!isBackground) setLoading(true)
       setError(null)
 
       let query = supabase.from("subscriptions").select(

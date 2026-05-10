@@ -26,9 +26,9 @@ export function useSettings() {
   const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
 
-  const fetchSettings = useCallback(async () => {
+  const fetchSettings = useCallback(async (isBackground = false) => {
     try {
-      setLoading(true);
+      if (!isBackground) setLoading(true);
       setError(null);
 
       const { data, error: fetchError } = await supabase

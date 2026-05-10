@@ -24,9 +24,9 @@ export function useWalletStats() {
     return () => { mountedRef.current = false; };
   }, []);
 
-  const fetchWalletStats = useCallback(async () => {
+  const fetchWalletStats = useCallback(async (isBackground = false) => {
     try {
-      setLoading(true);
+      if (!isBackground) setLoading(true);
       setError(null);
 
       // Fetch dynamic threshold

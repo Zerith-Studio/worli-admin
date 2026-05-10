@@ -27,12 +27,12 @@ export function useOrders() {
     }
   }, [])
 
-  const fetchOrders = useCallback(async () => {
+  const fetchOrders = useCallback(async (isBackground = false) => {
     try {
       console.log(
         `[useOrders] fetchOrders started. mountedRef=${mountedRef.current}`,
       )
-      setLoading(true)
+      if (!isBackground) setLoading(true)
       setError(null)
 
       let query = supabase.from("orders").select(

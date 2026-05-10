@@ -20,9 +20,9 @@ export function useRoutes() {
     return () => { mountedRef.current = false; };
   }, []);
 
-  const fetchRoutes = useCallback(async () => {
+  const fetchRoutes = useCallback(async (isBackground = false) => {
     try {
-      setLoading(true);
+      if (!isBackground) setLoading(true);
       setError(null);
 
       // Fetch hubs for dropdowns

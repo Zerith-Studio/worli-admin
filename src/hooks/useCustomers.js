@@ -27,12 +27,12 @@ export function useCustomers() {
     }
   }, [])
 
-  const fetchCustomers = useCallback(async () => {
+  const fetchCustomers = useCallback(async (isBackground = false) => {
     try {
       console.log(
         `[useCustomers] fetchCustomers started. mountedRef=${mountedRef.current}`,
       )
-      setLoading(true)
+      if (!isBackground) setLoading(true)
       setError(null)
 
       // Fetch dynamic low-balance threshold

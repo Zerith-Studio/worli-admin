@@ -22,9 +22,9 @@ export function useDrivers() {
     return () => { mountedRef.current = false; };
   }, []);
 
-  const fetchDrivers = useCallback(async () => {
+  const fetchDrivers = useCallback(async (isBackground = false) => {
     try {
-      setLoading(true);
+      if (!isBackground) setLoading(true);
       setError(null);
 
       // Fetch hubs and routes for assignment dropdowns

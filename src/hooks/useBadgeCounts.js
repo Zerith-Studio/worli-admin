@@ -32,7 +32,7 @@ export function useBadgeCounts() {
     fetch();
 
     const interval = setInterval(() => {
-      if (mountedRef.current) fetch();
+      if (mountedRef.current && document.visibilityState === 'visible') fetch();
     }, 60000);
     return () => clearInterval(interval);
   }, []);

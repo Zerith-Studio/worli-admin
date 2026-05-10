@@ -33,7 +33,9 @@ export function useDataRefresh(
       console.log(
         `[useDataRefresh] interval tick. mountedRef=${mountedRef.current}`,
       )
-      if (mountedRef.current) refreshFn()
+      if (mountedRef.current && document.visibilityState === "visible") {
+        refreshFn(true)
+      }
     }, interval)
 
     return () => {
