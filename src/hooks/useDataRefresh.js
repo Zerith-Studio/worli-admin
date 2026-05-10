@@ -5,29 +5,42 @@
 // updates on unmounted components.
 // ============================================
 
-import { useEffect, useRef } from 'react';
-import { REFRESH_INTERVAL } from '../constants';
+import { useEffect, useRef } from "react"
+import { REFRESH_INTERVAL } from "../constants"
 
-export function useDataRefresh(refreshFn, interval = REFRESH_INTERVAL, enabled = true) {
-  const mountedRef = useRef(true);
+export function useDataRefresh(
+  refreshFn,
+  interval = REFRESH_INTERVAL,
+  enabled = true,
+) {
+  const mountedRef = useRef(true)
 
   useEffect(() => {
-    mountedRef.current = true;
-    return () => { mountedRef.current = false; };
-  }, []);
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled) {
+      console.log(`[useDataRefresh] not enabled`)
+      return
+    }
 
-    // NOTE: No initial refreshFn() call here — each data hook has its own
-    // useEffect that handles the initial fetch. Calling it here too caused
-    // duplicate in-flight requests and loading-state races on navigation.
+    console.log(`[useDataRefresh] setting up setInterval for ${interval}ms`)
     const id = setInterval(() => {
-      if (mountedRef.current) refreshFn();
-    }, interval);
+      console.log(
+        `[useDataRefresh] interval tick. mountedRef=${mountedRef.current}`,
+      )
+      if (mountedRef.current) refreshFn()
+    }, interval)
 
-    return () => clearInterval(id);
-  }, [refreshFn, interval, enabled]);
+    return () => {
+      console.log(`[useDataRefresh] clearing interval`)
+      clearInterval(id)
+    }
+  }, [refreshFn, interval, enabled])
 
-  return { refresh: refreshFn };
+  return { refresh: refreshFn }
 }
