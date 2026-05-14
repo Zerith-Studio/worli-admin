@@ -36,7 +36,7 @@ export function useCustomers() {
 
       let query = supabase.from("users").select(
         `
-          id, full_name, phone_number, email, bottles_pending, created_at,
+          id, full_name, phone_number, email, bottles_pending, created_at, is_active,
           wallets(balance),
           addresses(city, is_default),
           subscriptions!left(id, status)
@@ -89,6 +89,7 @@ export function useCustomers() {
             city: defaultAddress?.city || "—",
             wallet: balance,
             bottles_pending: user.bottles_pending || 0,
+            isActive: user.is_active !== false, // treat null/undefined as true
             status,
             joined: user.created_at?.split("T")[0],
             totalOrders: user.subscriptions?.length || 0,
@@ -134,6 +135,20 @@ export function useCustomers() {
     setPage(newPage)
   }, [])
 
+  const updateUserStatus = useCallback(async (userId, isActive) => {
+    try {
+      const { error } = await supabase
+        .from("users")
+        .update({ is_active: isActive })
+        .eq("id", userId)
+      if (error) throw error
+      await fetchCustomers(true)
+      return { success: true }
+    } catch (err) {
+      return { success: false, error: err.message }
+    }
+  }, [fetchCustomers])
+
   const totalPages = Math.ceil(totalCount / PAGE_SIZE)
 
   return {
@@ -147,6 +162,7 @@ export function useCustomers() {
     minWalletBalance,
     updateFilters,
     goToPage,
+    updateUserStatus,
     refresh: fetchCustomers,
   }
 }

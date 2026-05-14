@@ -34,6 +34,8 @@ import {
   DiscountsPage,
   OffersPage,
   FreeSamplePage,
+  ProductsPage,
+  AddressesPage,
 } from "./components/pages"
 import { Button } from "./components/ui/Button"
 import { NAV_ITEMS, GROUP_LABELS } from "./constants"
@@ -120,6 +122,8 @@ function MainLayout({ groupedNav, logout }) {
             <Route path="/discounts" element={<DiscountsPage />} />
             <Route path="/offers" element={<OffersPage />} />
             <Route path="/free-sample" element={<FreeSamplePage />} />
+            <Route path="/products" element={<ProductsPage />} />
+            <Route path="/addresses" element={<AddressesPage />} />
             <Route path="/hubs" element={<HubsPage />} />
             <Route path="/routes" element={<RoutesPage />} />
             <Route path="/drivers" element={<DriversPage />} />

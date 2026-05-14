@@ -79,9 +79,6 @@ export function OrdersPage() {
           onChange={(value) => updateFilters({ status: value })}
           options={STATUSES}
         />
-        <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-          <Button>Bulk Action</Button>
-        </div>
       </div>
 
       <div className="card" style={{ padding: 0 }}>

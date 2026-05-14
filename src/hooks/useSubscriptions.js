@@ -91,22 +91,42 @@ export function useSubscriptions() {
         data?.map((sub) => ({
           id: sub.id,
           customerId: sub.user_id,
-          customerName: sub.users?.full_name || "Unknown",
+          customerName: sub.users?.full_name || 'Unknown',
           customerPhone: sub.users?.phone_number,
-          city: sub.addresses?.city || "—",
+          city: sub.addresses?.city || '—',
           productId: sub.product_id,
-          productName: sub.products?.name || "Unknown",
-          productUnit: sub.products?.volume || "",
+          productName: sub.products?.name || 'Unknown',
+          productUnit: sub.products?.volume || '',
           quantity: sub.quantity || 1,
-          type: sub.frequency || "daily",
-          status: sub.status || "active",
+          type: sub.frequency || 'daily',
+          status: sub.status || 'active',
           startDate: sub.start_date,
           price: (sub.products?.price || 0) * (sub.quantity || 1),
           discountAmount: sub.discount_amount || 0,
           remainingBottles: sub.remaining_bottles,
           intervalDays: sub.interval_days,
           pausedDates: sub.paused_dates || [],
+          activePause: null, // filled below for paused subs
         })) || []
+
+      // Fetch active holds for paused subscriptions
+      const pausedIds = transformedData.filter(s => s.status === 'paused').map(s => s.id)
+      if (pausedIds.length > 0) {
+        const today = new Date().toISOString().split('T')[0]
+        const { data: holdsData } = await supabase
+          .from('subscription_holds')
+          .select('subscription_id, start_date, end_date')
+          .in('subscription_id', pausedIds)
+          .lte('start_date', today)
+          .gte('end_date', today)
+          .order('start_date', { ascending: false })
+        // Map latest hold per subscription
+        const holdsMap = {}
+        holdsData?.forEach(h => {
+          if (!holdsMap[h.subscription_id]) holdsMap[h.subscription_id] = h
+        })
+        transformedData.forEach(s => { s.activePause = holdsMap[s.id] || null })
+      }
 
       setSubscriptions(transformedData)
       setTotalCount(count || 0)

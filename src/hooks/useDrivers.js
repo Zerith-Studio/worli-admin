@@ -1,9 +1,8 @@
 // ============================================
 // FILE: hooks/useDrivers.js
-// Rewritten per schema.sql: riders table has hub_id, vehicle_info,
-// status, is_verified, total_deliveries. Name/phone come from users.
-// Added: profile editing, verified toggle, route assignment,
-// completed/failed delivery counts from orders table.
+// Riders table no longer has hub_id.
+// Hub is derived via rider_routes → routes → hubs.
+// Route assignment uses hub→route cascade (select hub first, then its routes).
 // ============================================
 
 import { useState, useEffect, useCallback, useRef } from 'react';
@@ -12,8 +11,8 @@ import { withTimeout } from '../lib/query';
 
 export function useDrivers() {
   const [drivers, setDrivers] = useState([]);
-  const [routes, setRoutes] = useState([]);
-  const [hubs, setHubs] = useState([]);
+  const [routes, setRoutes] = useState([]);   // all active routes (with hub info)
+  const [hubs, setHubs] = useState([]);       // all active hubs
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const mountedRef = useRef(true);
@@ -28,7 +27,7 @@ export function useDrivers() {
       if (!isBackground) setLoading(true);
       setError(null);
 
-      // Fetch hubs and routes for assignment dropdowns
+      // Fetch hubs and routes for cascade assignment dropdowns
       const [{ data: hubsData }, { data: routesData }] = await withTimeout(Promise.all([
         supabase.from('hubs').select('id, name').eq('is_active', true).order('name'),
         supabase.from('routes').select('id, name, hub_id, hubs(name)').eq('is_active', true).order('name'),
@@ -38,10 +37,10 @@ export function useDrivers() {
         setRoutes(routesData || []);
       }
 
-      // Fetch riders with hub info
+      // Fetch riders (no hub_id any more)
       const { data: ridersData, error: ridersError } = await supabase
         .from('riders')
-        .select('*, hubs(name)');
+        .select('id, vehicle_info, status, is_verified, total_deliveries');
       if (ridersError) throw ridersError;
 
       const riderIds = ridersData?.map(r => r.id) || [];
@@ -71,17 +70,21 @@ export function useDrivers() {
         else if (o.status === 'failed') statsMap[o.rider_id].failed++;
       });
 
-      // Fetch today's route assignments per rider
+      // Fetch today's route assignments per rider (with hub info via join)
       const today = new Date().toISOString().split('T')[0];
       const { data: routeAssignments } = await supabase
         .from('rider_routes')
-        .select('rider_id, route_id, routes(name)')
+        .select('rider_id, route_id, routes(name, hub_id, hubs(name))')
         .in('rider_id', riderIds)
         .eq('assigned_date', today);
       const assignmentMap = {};
       routeAssignments?.forEach(ra => {
         if (!assignmentMap[ra.rider_id]) assignmentMap[ra.rider_id] = [];
-        assignmentMap[ra.rider_id].push({ routeId: ra.route_id, routeName: ra.routes?.name || '—' });
+        assignmentMap[ra.rider_id].push({
+          routeId: ra.route_id,
+          routeName: ra.routes?.name || '—',
+          hubName: ra.routes?.hubs?.name || '—',
+        });
       });
 
       if (!mountedRef.current) return;
@@ -90,8 +93,6 @@ export function useDrivers() {
         id: rider.id,
         name: usersMap[rider.id]?.full_name || 'Unnamed',
         phone: usersMap[rider.id]?.phone_number || '—',
-        hubId: rider.hub_id,
-        hubName: rider.hubs?.name || 'Unassigned',
         vehicle: rider.vehicle_info || '—',
         status: rider.status || 'active',
         isVerified: rider.is_verified || false,
@@ -99,6 +100,8 @@ export function useDrivers() {
         completedDeliveries: statsMap[rider.id]?.completed || 0,
         failedDeliveries: statsMap[rider.id]?.failed || 0,
         assignedRoutes: assignmentMap[rider.id] || [],
+        // Derive primary hub from today's first route assignment
+        hubName: assignmentMap[rider.id]?.[0]?.hubName || 'Unassigned',
       }));
 
       setDrivers(transformed);
@@ -134,12 +137,12 @@ export function useDrivers() {
     }
   }, [fetchDrivers]);
 
-  // Profile editing: name/phone → users table; vehicle/hub → riders table
-  const updateDriverProfile = useCallback(async (id, { full_name, phone_number, vehicle_info, hub_id }) => {
+  // Profile editing: name/phone → users; vehicle → riders (no hub_id)
+  const updateDriverProfile = useCallback(async (id, { full_name, phone_number, vehicle_info }) => {
     try {
       const [r1, r2] = await Promise.all([
         supabase.from('users').update({ full_name, phone_number }).eq('id', id),
-        supabase.from('riders').update({ vehicle_info, hub_id: hub_id || null }).eq('id', id),
+        supabase.from('riders').update({ vehicle_info }).eq('id', id),
       ]);
       if (r1.error) throw r1.error;
       if (r2.error) throw r2.error;

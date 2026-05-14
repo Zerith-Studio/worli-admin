@@ -1,7 +1,7 @@
 // ============================================
 // FILE: components/pages/DriversPage.jsx
-// Rewritten: profile editing, verified toggle, route assignment,
-// real delivery stats. Removed rating + weekly performance chart.
+// hub_id removed from riders. Hub is derived from assigned routes.
+// Route assignment uses hub→route cascade: pick hub first, then routes of that hub.
 // ============================================
 
 import React, { useState } from 'react';
@@ -26,13 +26,19 @@ export function DriversPage() {
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState('');
 
+  // Cascaded hub→route selectors for route assignment
+  const [assignHubId, setAssignHubId] = useState('');
+  const [assignRouteId, setAssignRouteId] = useState('');
+
   useDataRefresh(refresh, 60000, true);
 
   const openDriver = (d) => {
     setSelectedDriver(d);
     setTab('profile');
-    setEditForm({ full_name: d.name, phone_number: d.phone, vehicle_info: d.vehicle, hub_id: d.hubId || '' });
+    setEditForm({ full_name: d.name, phone_number: d.phone, vehicle_info: d.vehicle });
     setSaveMsg('');
+    setAssignHubId('');
+    setAssignRouteId('');
   };
 
   const handleSaveProfile = async () => {
@@ -42,13 +48,11 @@ export function DriversPage() {
       full_name: editForm.full_name,
       phone_number: editForm.phone_number,
       vehicle_info: editForm.vehicle_info,
-      hub_id: editForm.hub_id || null,
     });
     setSaving(false);
     if (result.success) {
       setSaveMsg('Saved ✓');
-      // Update local selectedDriver
-      setSelectedDriver(prev => ({ ...prev, name: editForm.full_name, phone: editForm.phone_number, vehicle: editForm.vehicle_info, hubId: editForm.hub_id }));
+      setSelectedDriver(prev => ({ ...prev, name: editForm.full_name, phone: editForm.phone_number, vehicle: editForm.vehicle_info }));
     } else {
       setSaveMsg(`Error: ${result.error}`);
     }
@@ -65,17 +69,21 @@ export function DriversPage() {
     setSelectedDriver(prev => ({ ...prev, isVerified: newVal }));
   };
 
-  const handleAssignRoute = async (routeId) => {
-    await assignRoute(selectedDriver.id, routeId);
-    // Refresh driver list to get updated routes
-    await refresh();
-    // Update local selectedDriver routes
-    const route = routes.find(r => r.id === routeId);
-    if (route) {
+  const handleAssignRoute = async () => {
+    if (!assignRouteId) return;
+    const result = await assignRoute(selectedDriver.id, assignRouteId);
+    if (result.success) {
+      const route = routes.find(r => r.id === assignRouteId);
+      const hub = hubs.find(h => h.id === assignHubId);
       setSelectedDriver(prev => ({
         ...prev,
-        assignedRoutes: [...(prev.assignedRoutes || []), { routeId, routeName: route.name }],
+        assignedRoutes: [
+          ...(prev.assignedRoutes || []),
+          { routeId: assignRouteId, routeName: route?.name || '—', hubName: hub?.name || '—' },
+        ],
       }));
+      setAssignHubId('');
+      setAssignRouteId('');
     }
   };
 
@@ -95,8 +103,12 @@ export function DriversPage() {
     return <div className="card" style={{ margin: '20px', padding: '20px', color: 'var(--red)' }}>Error: {error}</div>;
   }
 
-  const unassignedRoutes = routes.filter(r =>
-    !selectedDriver?.assignedRoutes?.some(ar => ar.routeId === r.id)
+  // Routes already assigned today by this driver
+  const assignedRouteIds = new Set(selectedDriver?.assignedRoutes?.map(r => r.routeId) || []);
+
+  // Routes filtered by the selected hub that aren't yet assigned
+  const filteredRoutes = routes.filter(r =>
+    r.hub_id === assignHubId && !assignedRouteIds.has(r.id)
   );
 
   return (
@@ -178,7 +190,7 @@ export function DriversPage() {
             ))}
           </div>
 
-          {/* Profile edit tab */}
+          {/* Profile edit tab — no hub dropdown (hub is derived from routes) */}
           {tab === 'profile' && editForm && (
             <div>
               <div className="form-group">
@@ -196,13 +208,8 @@ export function DriversPage() {
                 <input className="form-input" placeholder="e.g. Honda Activa KA01AB1234" value={editForm.vehicle_info}
                   onChange={e => setEditForm(p => ({ ...p, vehicle_info: e.target.value }))} />
               </div>
-              <div className="form-group">
-                <label className="form-label">Hub</label>
-                <select className="form-select" value={editForm.hub_id}
-                  onChange={e => setEditForm(p => ({ ...p, hub_id: e.target.value }))}>
-                  <option value="">— Unassigned —</option>
-                  {hubs.map(h => <option key={h.id} value={h.id}>{h.name}</option>)}
-                </select>
+              <div style={{ fontSize: 11.5, color: 'var(--text-3)', marginBottom: 12, padding: '8px 12px', background: 'var(--bg)', borderRadius: 6 }}>
+                💡 Hub is derived from today's assigned routes. Assign routes in the Routes tab.
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
                 <Button variant="primary" onClick={handleSaveProfile} disabled={saving}>
@@ -249,7 +256,7 @@ export function DriversPage() {
             </div>
           )}
 
-          {/* Route assignment tab */}
+          {/* Route assignment tab — hub → route cascade */}
           {tab === 'routes' && (
             <div>
               <div style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 10 }}>Today's assigned routes:</div>
@@ -259,22 +266,51 @@ export function DriversPage() {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 14 }}>
                   {selectedDriver.assignedRoutes.map(r => (
                     <div key={r.routeId} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--bg)', padding: '8px 12px', borderRadius: 6 }}>
-                      <span style={{ fontSize: 13, fontWeight: 500 }}>🗺 {r.routeName}</span>
+                      <div>
+                        <span style={{ fontSize: 13, fontWeight: 500 }}>🗺 {r.routeName}</span>
+                        <span style={{ fontSize: 11, color: 'var(--text-3)', marginLeft: 6 }}>({r.hubName})</span>
+                      </div>
                       <Button size="sm" style={{ color: 'var(--red)' }} onClick={() => handleRemoveRoute(r.routeId)}>Remove</Button>
                     </div>
                   ))}
                 </div>
               )}
 
-              {unassignedRoutes.length > 0 && (
-                <div>
-                  <div style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 8 }}>Assign a route:</div>
-                  <select className="form-select" defaultValue=""
-                    onChange={async e => { if (e.target.value) { await handleAssignRoute(e.target.value); e.target.value = ''; } }}>
-                    <option value="">— Pick a route —</option>
-                    {unassignedRoutes.map(r => <option key={r.id} value={r.id}>{r.name} ({r.hubs?.name || 'No Hub'})</option>)}
-                  </select>
+              {/* Cascaded assignment: pick hub → then route */}
+              <div style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 8, marginTop: 4 }}>Assign a route:</div>
+
+              {/* Step 1: Hub */}
+              <div className="form-group">
+                <label className="form-label" style={{ fontSize: 11 }}>1. Select Hub</label>
+                <select className="form-select" value={assignHubId}
+                  onChange={e => { setAssignHubId(e.target.value); setAssignRouteId(''); }}>
+                  <option value="">— Pick a hub —</option>
+                  {hubs.map(h => <option key={h.id} value={h.id}>{h.name}</option>)}
+                </select>
+              </div>
+
+              {/* Step 2: Route (filtered by hub) */}
+              {assignHubId && (
+                <div className="form-group">
+                  <label className="form-label" style={{ fontSize: 11 }}>2. Select Route</label>
+                  {filteredRoutes.length === 0 ? (
+                    <div style={{ fontSize: 12, color: 'var(--text-3)', padding: '8px 0' }}>
+                      No unassigned routes for this hub.
+                    </div>
+                  ) : (
+                    <select className="form-select" value={assignRouteId}
+                      onChange={e => setAssignRouteId(e.target.value)}>
+                      <option value="">— Pick a route —</option>
+                      {filteredRoutes.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                    </select>
+                  )}
                 </div>
+              )}
+
+              {assignRouteId && (
+                <Button variant="primary" onClick={handleAssignRoute} style={{ width: '100%', marginTop: 4 }}>
+                  Assign Route
+                </Button>
               )}
             </div>
           )}

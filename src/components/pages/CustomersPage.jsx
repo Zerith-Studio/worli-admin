@@ -25,11 +25,12 @@ const STATUSES = [
 export function CustomersPage() {
   const {
     customers, loading, error, page, totalPages, totalCount,
-    filters, minWalletBalance, updateFilters, goToPage, refresh,
+    filters, minWalletBalance, updateFilters, goToPage, updateUserStatus, refresh,
   } = useCustomers();
 
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [tab, setTab] = useState('info');
+  const [statusMsg, setStatusMsg] = useState(null);
 
   useDataRefresh(refresh, 60000, true);
 
@@ -97,7 +98,7 @@ export function CustomersPage() {
                   <td><span style={{ fontSize: 12, color: 'var(--text-3)' }}>🍶 {c.bottles_pending} pending</span></td>
                   <td><StatusBadge status={c.status} /></td>
                   <td>
-                    <Button size="sm" onClick={() => { setSelectedCustomer(c); setTab('info'); }}>View</Button>
+                    <Button size="sm" onClick={() => { setSelectedCustomer(c); setTab('info'); setStatusMsg(null); }}>View</Button>
                   </td>
                 </tr>
               ))}
@@ -135,7 +136,7 @@ export function CustomersPage() {
           </div>
 
           <div className="tabs">
-            {['info', 'wallet', 'assets'].map(t => (
+            {['info', 'wallet', 'assets', 'status'].map(t => (
               <div key={t} className={`tab ${tab === t ? 'active' : ''}`} onClick={() => setTab(t)}>
                 {t.charAt(0).toUpperCase() + t.slice(1)}
               </div>
@@ -181,6 +182,55 @@ export function CustomersPage() {
                 <div style={{ fontSize: 22, fontWeight: 700, fontFamily: "'DM Mono',monospace", color: selectedCustomer.bottles_pending > 3 ? 'var(--red)' : 'var(--yellow)' }}>
                   🍶 {selectedCustomer.bottles_pending}
                 </div>
+              </div>
+            </div>
+          )}
+
+          {tab === 'status' && (
+            <div style={{ marginTop: 12 }}>
+              <div style={{
+                padding: '12px 14px', borderRadius: 8, marginBottom: 14,
+                background: selectedCustomer.isActive ? 'var(--green-bg, rgba(34,197,94,0.1))' : 'var(--red-bg)',
+              }}>
+                <div style={{ fontWeight: 600, fontSize: 13, color: selectedCustomer.isActive ? 'var(--green)' : 'var(--red)' }}>
+                  {selectedCustomer.isActive ? '✅ Account Active' : '🚫 Account Blocked'}
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 4 }}>
+                  {selectedCustomer.isActive
+                    ? 'This customer can log in and place orders.'
+                    : 'This customer cannot log in. Their data is preserved.'}
+                </div>
+              </div>
+
+              {statusMsg && (
+                <div style={{
+                  padding: '8px 12px', borderRadius: 6, marginBottom: 12, fontSize: 13,
+                  background: statusMsg.ok ? 'var(--green-bg, rgba(34,197,94,0.1))' : 'var(--red-bg)',
+                  color: statusMsg.ok ? 'var(--green)' : 'var(--red)',
+                }}>
+                  {statusMsg.text}
+                </div>
+              )}
+
+              <Button
+                variant={selectedCustomer.isActive ? 'secondary' : 'primary'}
+                style={{ color: selectedCustomer.isActive ? 'var(--red)' : 'var(--green)', width: '100%' }}
+                onClick={async () => {
+                  const newVal = !selectedCustomer.isActive
+                  const result = await updateUserStatus(selectedCustomer.id, newVal)
+                  if (result.success) {
+                    setSelectedCustomer(prev => ({ ...prev, isActive: newVal }))
+                    setStatusMsg({ ok: true, text: newVal ? 'Account unblocked ✓' : 'Account blocked ✓' })
+                  } else {
+                    setStatusMsg({ ok: false, text: result.error })
+                  }
+                }}
+              >
+                {selectedCustomer.isActive ? '🚫 Block Account' : '✅ Unblock Account'}
+              </Button>
+
+              <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 8, textAlign: 'center' }}>
+                Blocking prevents login but preserves all subscriptions and data.
               </div>
             </div>
           )}

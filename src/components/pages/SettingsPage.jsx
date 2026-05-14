@@ -66,7 +66,7 @@ export function SettingsPage() {
           </div>
           <div className="form-group">
             <label className="form-label">Delivery Info (HTML/Text)</label>
-            <textarea className="form-input" rows="3" value={localSettings.delivery_info || ''} onChange={e => updateLocal('delivery_info', e.target.value)} />
+            <textarea className="form-input" rows="7" style={{ minHeight: 130, resize: "vertical" }} value={localSettings.delivery_info || ''} onChange={e => updateLocal('delivery_info', e.target.value)} />
           </div>
         </div>
 

@@ -1,98 +1,124 @@
-import React, { useState, useEffect } from "react"
+import React, { useState, useEffect, useCallback } from "react"
 import { supabase } from "../../lib/supabase"
 import { Badge } from "../ui/Badge"
 import { Button } from "../ui/Button"
 import { Modal } from "../ui/Modal"
+import { LoadingSpinner } from "../ui/LoadingSpinner"
+
+function getInitialForm() {
+  return {
+    title: "",
+    description: "",
+    image_url: "",
+    link_url: "",
+    discount_id: "",
+    valid_from: "",
+    valid_until: "",
+    is_active: true,
+    display_order: "0",
+  }
+}
+
+function formatDateTimeLocal(isoString) {
+  if (!isoString) return ""
+  // Slice to "YYYY-MM-DDTHH:mm" for datetime-local input
+  return isoString.slice(0, 16)
+}
 
 export function OffersPage() {
-  const [loading, setLoading] = useState(true)
   const [offers, setOffers] = useState([])
+  const [discounts, setDiscounts] = useState([]) // for the dropdown
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [currentOffer, setCurrentOffer] = useState(null)
-  const [formData, setFormData] = useState(getInitialFormData())
+  const [form, setForm] = useState(getInitialForm())
   const [saving, setSaving] = useState(false)
+  const [formError, setFormError] = useState(null)
 
-  function getInitialFormData() {
-    return {
-      title: "",
-      description: "",
-      image_url: "",
-      link_url: "",
-      offer_type: "",
-      discount_percentage: "",
-      discount_amount: "",
-      is_active: true,
-      display_order: "0"
-    }
-  }
-
-  useEffect(() => {
-    fetchOffers()
-  }, [])
-
-  const fetchOffers = async () => {
+  // ── Fetch ──────────────────────────────────────────────────────────────────
+  const fetchOffers = useCallback(async () => {
     setLoading(true)
+    setError(null)
     try {
-      const { data, error } = await supabase
+      const { data, error: err } = await supabase
         .from("offers")
-        .select("*")
+        .select("*, discounts(code, description)")
         .order("display_order", { ascending: true })
-      if (error) throw error
+      if (err) throw err
       setOffers(data || [])
-    } catch (err) {
-      console.error(err)
+    } catch (e) {
+      setError(e.message)
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
 
-  const handleOpenModal = (offer = null) => {
+  const fetchDiscounts = useCallback(async () => {
+    const { data } = await supabase
+      .from("discounts")
+      .select("id, code, description")
+      .eq("is_active", true)
+      .order("code")
+    setDiscounts(data || [])
+  }, [])
+
+  useEffect(() => {
+    fetchOffers()
+    fetchDiscounts()
+  }, [fetchOffers, fetchDiscounts])
+
+  // ── Open / Close ───────────────────────────────────────────────────────────
+  const openModal = (offer = null) => {
+    setFormError(null)
     if (offer) {
       setCurrentOffer(offer)
-      setFormData({
+      setForm({
         title: offer.title,
         description: offer.description || "",
         image_url: offer.image_url || "",
         link_url: offer.link_url || "",
-        offer_type: offer.offer_type || "",
-        discount_percentage: offer.discount_percentage || "",
-        discount_amount: offer.discount_amount || "",
+        discount_id: offer.discount_id || "",
+        valid_from: formatDateTimeLocal(offer.valid_from),
+        valid_until: formatDateTimeLocal(offer.valid_until),
         is_active: offer.is_active,
-        display_order: offer.display_order || "0"
+        display_order: String(offer.display_order ?? "0"),
       })
     } else {
       setCurrentOffer(null)
-      setFormData(getInitialFormData())
+      setForm(getInitialForm())
     }
     setIsModalOpen(true)
   }
 
-  const handleCloseModal = () => {
+  const closeModal = () => {
     setIsModalOpen(false)
     setCurrentOffer(null)
   }
 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target
-    setFormData((prev) => ({
-      ...prev,
-      [name]: type === "checkbox" ? checked : value,
-    }))
+    setForm(prev => ({ ...prev, [name]: type === "checkbox" ? checked : value }))
   }
 
+  // ── Save ───────────────────────────────────────────────────────────────────
   const handleSave = async () => {
+    setFormError(null)
+    if (!form.title.trim()) { setFormError("Title is required."); return }
+
+    setSaving(true)
     try {
-      setSaving(true)
       const payload = {
-        title: formData.title,
-        description: formData.description || null,
-        image_url: formData.image_url || null,
-        link_url: formData.link_url || null,
-        offer_type: formData.offer_type || null,
-        discount_percentage: formData.discount_percentage ? parseFloat(formData.discount_percentage) : null,
-        discount_amount: formData.discount_amount ? parseFloat(formData.discount_amount) : null,
-        is_active: formData.is_active,
-        display_order: parseInt(formData.display_order) || 0
+        title: form.title.trim(),
+        description: form.description.trim() || null,
+        image_url: form.image_url.trim() || null,
+        link_url: form.link_url.trim() || null,
+        discount_id: form.discount_id || null,
+        valid_from: form.valid_from || null,
+        valid_until: form.valid_until || null,
+        is_active: form.is_active,
+        display_order: parseInt(form.display_order, 10) || 0,
       }
 
       if (currentOffer) {
@@ -103,109 +129,200 @@ export function OffersPage() {
         if (err) throw err
       }
 
-      handleCloseModal()
+      closeModal()
       fetchOffers()
-    } catch (err) {
-      alert("Error saving offer: " + err.message)
+    } catch (e) {
+      setFormError("Save failed: " + e.message)
     } finally {
       setSaving(false)
     }
   }
 
+  // ── Delete ─────────────────────────────────────────────────────────────────
   const handleDelete = async (id) => {
-    if (!window.confirm("Are you sure you want to delete this offer?")) return
-    try {
-      const { error: err } = await supabase.from("offers").delete().eq("id", id)
-      if (err) throw err
-      fetchOffers()
-    } catch (err) {
-      alert("Error deleting offer: " + err.message)
-    }
+    if (!window.confirm("Delete this offer?")) return
+    const { error: err } = await supabase.from("offers").delete().eq("id", id)
+    if (err) { alert("Delete failed: " + err.message); return }
+    fetchOffers()
   }
+
+  const toggleActive = async (offer) => {
+    const { error: err } = await supabase
+      .from("offers").update({ is_active: !offer.is_active }).eq("id", offer.id)
+    if (err) { alert("Update failed: " + err.message); return }
+    fetchOffers()
+  }
+
+  // ── Render ─────────────────────────────────────────────────────────────────
+  const activeCount = offers.filter(o => o.is_active).length
 
   return (
     <div>
       <div className="page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div>
-          <div className="page-title">Offers & Creatives</div>
-          <div className="page-sub">{offers.length} active offers</div>
+          <div className="page-title">Offers &amp; Creatives</div>
+          <div className="page-sub">{activeCount} active · {offers.length} total</div>
         </div>
-        <Button onClick={() => handleOpenModal()} variant="primary">Add Offer</Button>
+        <Button variant="primary" onClick={() => openModal()}>+ Add Offer</Button>
       </div>
 
-      <div className="card">
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>Title</th>
-              <th>Type</th>
-              <th>Active</th>
-              <th>Order</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {offers.map((offer) => (
-              <tr key={offer.id}>
-                <td><strong>{offer.title}</strong></td>
-                <td>{offer.offer_type || "-"}</td>
-                <td><Badge variant={offer.is_active ? "success" : "neutral"}>{offer.is_active ? "Active" : "Inactive"}</Badge></td>
-                <td>{offer.display_order}</td>
-                <td>
-                  <Button variant="secondary" onClick={() => handleOpenModal(offer)} style={{ marginRight: 8 }}>Edit</Button>
-                  <Button variant="secondary" style={{ color: "var(--red)", borderColor: "var(--red)" }} onClick={() => handleDelete(offer.id)}>Delete</Button>
-                </td>
+      {loading && <div style={{ padding: 40, display: "flex", justifyContent: "center" }}><LoadingSpinner /></div>}
+      {error && <div className="card" style={{ color: "var(--red)", padding: 20 }}>Error: {error}</div>}
+
+      {!loading && !error && (
+        <div className="card">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Preview</th>
+                <th>Title</th>
+                <th>Linked Discount</th>
+                <th>Validity</th>
+                <th>Order</th>
+                <th>Status</th>
+                <th>Actions</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {offers.length === 0 && (
+                <tr><td colSpan={7} style={{ textAlign: "center", color: "var(--text-3)", padding: 32 }}>No offers yet</td></tr>
+              )}
+              {offers.map(offer => (
+                <tr key={offer.id}>
+                  <td>
+                    {offer.image_url ? (
+                      <img src={offer.image_url} alt="" style={{
+                        width: 60, height: 40, objectFit: "cover", borderRadius: 4,
+                        border: "1px solid var(--border)",
+                      }} />
+                    ) : (
+                      <div style={{
+                        width: 60, height: 40, borderRadius: 4, background: "var(--bg)",
+                        border: "1px solid var(--border)", display: "flex", alignItems: "center",
+                        justifyContent: "center", fontSize: 18,
+                      }}>🎉</div>
+                    )}
+                  </td>
+                  <td>
+                    <div style={{ fontWeight: 600 }}>{offer.title}</div>
+                    {offer.description && <div style={{ color: "var(--text-3)", fontSize: 11 }}>{offer.description}</div>}
+                  </td>
+                  <td>
+                    {offer.discounts ? (
+                      <Badge variant="info">{offer.discounts.code}</Badge>
+                    ) : "—"}
+                  </td>
+                  <td style={{ fontSize: 12 }}>
+                    {offer.valid_from ? new Date(offer.valid_from).toLocaleDateString("en-IN") : "—"}
+                    {offer.valid_from && offer.valid_until ? " → " : ""}
+                    {offer.valid_until ? new Date(offer.valid_until).toLocaleDateString("en-IN") : ""}
+                  </td>
+                  <td>{offer.display_order}</td>
+                  <td><Badge variant={offer.is_active ? "success" : "neutral"}>{offer.is_active ? "Active" : "Inactive"}</Badge></td>
+                  <td>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <Button variant="secondary" onClick={() => openModal(offer)}>Edit</Button>
+                      <Button variant="secondary"
+                        onClick={() => toggleActive(offer)}
+                        style={{ color: offer.is_active ? "var(--red)" : "var(--accent)" }}>
+                        {offer.is_active ? "Hide" : "Show"}
+                      </Button>
+                      <Button variant="secondary"
+                        onClick={() => handleDelete(offer.id)}
+                        style={{ color: "var(--red)", borderColor: "var(--red)" }}>🗑</Button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
+      {/* ── Modal ─────────────────────────────────────────────────────────── */}
       {isModalOpen && (
-        <Modal title={currentOffer ? "Edit Offer" : "New Offer"} onClose={handleCloseModal} footer={
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
-            <Button variant="secondary" onClick={handleCloseModal}>Cancel</Button>
-            <Button variant="primary" onClick={handleSave} disabled={saving}>{saving ? "Saving..." : "Save"}</Button>
-          </div>
-        }>
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <div className="form-group">
-              <label className="form-label">Title</label>
-              <input name="title" className="form-input" value={formData.title} onChange={handleChange} />
+        <Modal
+          title={currentOffer ? "Edit Offer" : "New Offer"}
+          onClose={closeModal}
+          footer={
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+              <Button variant="secondary" onClick={closeModal}>Cancel</Button>
+              <Button variant="primary" onClick={handleSave} disabled={saving}>
+                {saving ? "Saving…" : "Save Offer"}
+              </Button>
             </div>
+          }
+        >
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            {formError && (
+              <div style={{ padding: "10px 14px", background: "var(--red-bg)", color: "var(--red)", borderRadius: 6, fontSize: 13 }}>
+                {formError}
+              </div>
+            )}
+
+            <div className="form-group">
+              <label className="form-label">Title *</label>
+              <input name="title" className="form-input" value={form.title} onChange={handleChange} placeholder="Summer Special" />
+            </div>
+
             <div className="form-group">
               <label className="form-label">Description</label>
-              <input name="description" className="form-input" value={formData.description} onChange={handleChange} />
+              <textarea name="description" className="form-input" rows={2}
+                style={{ resize: "vertical" }} value={form.description} onChange={handleChange}
+                placeholder="Get 20% off on your first order…" />
             </div>
+
             <div className="form-group">
-              <label className="form-label">Image URL</label>
-              <input name="image_url" className="form-input" value={formData.image_url} onChange={handleChange} />
+              <label className="form-label">Banner Image URL</label>
+              <input name="image_url" className="form-input" value={form.image_url} onChange={handleChange}
+                placeholder="https://…" />
+              {form.image_url && (
+                <img src={form.image_url} alt="preview" onError={e => e.target.style.display = "none"}
+                  style={{ marginTop: 8, width: "100%", maxHeight: 120, objectFit: "cover", borderRadius: 6, border: "1px solid var(--border)" }} />
+              )}
             </div>
+
             <div className="form-group">
-              <label className="form-label">Link URL</label>
-              <input name="link_url" className="form-input" value={formData.link_url} onChange={handleChange} />
+              <label className="form-label">Link URL <span style={{ fontWeight: 400, color: "var(--text-3)" }}>(optional deep link)</span></label>
+              <input name="link_url" className="form-input" value={form.link_url} onChange={handleChange}
+                placeholder="milkride://product/..." />
             </div>
+
             <div className="form-group">
-              <label className="form-label">Offer Type</label>
-              <input name="offer_type" className="form-input" value={formData.offer_type} onChange={handleChange} />
+              <label className="form-label">Linked Discount Code <span style={{ fontWeight: 400, color: "var(--text-3)" }}>(optional)</span></label>
+              <select name="discount_id" className="form-input" value={form.discount_id} onChange={handleChange}>
+                <option value="">— None —</option>
+                {discounts.map(d => (
+                  <option key={d.id} value={d.id}>{d.code}{d.description ? ` — ${d.description}` : ""}</option>
+                ))}
+              </select>
+              <div style={{ fontSize: 11, color: "var(--text-3)", marginTop: 4 }}>
+                Links this creative to a discount code. All math stays in the Discounts table.
+              </div>
             </div>
-            <div style={{ display: "flex", gap: 10 }}>
+
+            <div style={{ display: "flex", gap: 12 }}>
               <div className="form-group" style={{ flex: 1 }}>
-                <label className="form-label">Discount %</label>
-                <input name="discount_percentage" type="number" className="form-input" value={formData.discount_percentage} onChange={handleChange} />
+                <label className="form-label">Valid From</label>
+                <input name="valid_from" type="datetime-local" className="form-input"
+                  value={form.valid_from} onChange={handleChange} />
               </div>
               <div className="form-group" style={{ flex: 1 }}>
-                <label className="form-label">Discount Amount</label>
-                <input name="discount_amount" type="number" className="form-input" value={formData.discount_amount} onChange={handleChange} />
+                <label className="form-label">Valid Until</label>
+                <input name="valid_until" type="datetime-local" className="form-input"
+                  value={form.valid_until} onChange={handleChange} />
               </div>
             </div>
+
             <div className="form-group">
-              <label className="form-label">Display Order</label>
-              <input name="display_order" type="number" className="form-input" value={formData.display_order} onChange={handleChange} />
+              <label className="form-label">Display Order <span style={{ fontWeight: 400, color: "var(--text-3)" }}>(lower = first)</span></label>
+              <input name="display_order" type="number" className="form-input"
+                value={form.display_order} onChange={handleChange} />
             </div>
-            <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <input name="is_active" type="checkbox" checked={formData.is_active} onChange={handleChange} />
-              Active
+
+            <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+              <input name="is_active" type="checkbox" checked={form.is_active} onChange={handleChange} />
+              <span>Active (visible in consumer app)</span>
             </label>
           </div>
         </Modal>

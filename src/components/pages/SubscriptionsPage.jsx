@@ -1,7 +1,6 @@
 // ============================================
 // FILE: components/pages/SubscriptionsPage.jsx
-// Removed: New Subscription button.
-// Fixed: default status=active, working filters, pagination.
+// Fixed: pause dates min=today, paused subs show date range in table.
 // ============================================
 
 import React, { useState } from 'react';
@@ -19,6 +18,17 @@ import { SUBSCRIPTION_TYPES, SUBSCRIPTION_STATUSES } from '../../constants';
 const TYPES = [{ value: 'all', label: 'All Types' }, ...SUBSCRIPTION_TYPES];
 const STATUSES = [{ value: 'all', label: 'All Statuses' }, ...SUBSCRIPTION_STATUSES];
 
+// Returns today's date in YYYY-MM-DD (local time)
+function todayStr() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function fmtDate(iso) {
+  if (!iso) return '';
+  return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
+}
+
 export function SubscriptionsPage() {
   const {
     subscriptions, loading, error, page, totalPages, totalCount,
@@ -31,9 +41,12 @@ export function SubscriptionsPage() {
 
   useDataRefresh(refresh, 60000, true);
 
+  const today = todayStr();
+
   const handleToggleStatus = async sub => {
     if (sub.status === 'active') {
       setPauseModal(sub);
+      setHoldDates({ start: today, end: '', reason: '' });
     } else if (sub.status === 'paused') {
       await updateSubscriptionStatus(sub.id, 'active');
     }
@@ -49,7 +62,7 @@ export function SubscriptionsPage() {
     });
     setSaving(false);
     setPauseModal(null);
-    setHoldDates({ start: '', end: '', reason: '' });
+    setHoldDates({ start: today, end: '', reason: '' });
   };
 
   if (loading && subscriptions.length === 0) {
@@ -114,7 +127,15 @@ export function SubscriptionsPage() {
                     )}
                   </td>
                   <td style={{ fontSize: 11.5, color: 'var(--text-3)' }}>{s.city}</td>
-                  <td><StatusBadge status={s.status} /></td>
+                  <td>
+                    <StatusBadge status={s.status} />
+                    {/* Show active pause date range */}
+                    {s.status === 'paused' && s.activePause && (
+                      <div style={{ fontSize: 10.5, color: 'var(--text-3)', marginTop: 2 }}>
+                        {fmtDate(s.activePause.start_date)} → {fmtDate(s.activePause.end_date)}
+                      </div>
+                    )}
+                  </td>
                   <td>
                     {(s.status === 'active' || s.status === 'paused') && (
                       <Button
@@ -141,7 +162,7 @@ export function SubscriptionsPage() {
           footer={
             <>
               <Button onClick={() => setPauseModal(null)}>Cancel</Button>
-              <Button variant="primary" onClick={handleApplyHold} disabled={saving}>
+              <Button variant="primary" onClick={handleApplyHold} disabled={saving || !holdDates.start || !holdDates.end}>
                 {saving ? 'Saving...' : 'Apply Hold'}
               </Button>
             </>
@@ -153,11 +174,13 @@ export function SubscriptionsPage() {
           <div className="form-group">
             <label className="form-label">From Date</label>
             <input type="date" className="form-input" value={holdDates.start}
-              onChange={e => setHoldDates(p => ({ ...p, start: e.target.value }))} />
+              min={today}
+              onChange={e => setHoldDates(p => ({ ...p, start: e.target.value, end: p.end < e.target.value ? '' : p.end }))} />
           </div>
           <div className="form-group">
             <label className="form-label">To Date</label>
             <input type="date" className="form-input" value={holdDates.end}
+              min={holdDates.start || today}
               onChange={e => setHoldDates(p => ({ ...p, end: e.target.value }))} />
           </div>
           <div className="form-group">
