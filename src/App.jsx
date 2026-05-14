@@ -18,6 +18,9 @@ import {
   DashboardPage,
   CustomersPage,
   SubscriptionsPage,
+  ReferralsPage,
+  NotificationsPage,
+  SupportTicketsPage,
   OrdersPage,
   DeliverySchedulePage,
   DemandForecastPage,
@@ -25,8 +28,12 @@ import {
   RoutesPage,
   DriversPage,
   WalletPage,
+  AutopayQueuePage,
   AssetTrackingPage,
   SettingsPage,
+  DiscountsPage,
+  OffersPage,
+  FreeSamplePage,
 } from "./components/pages"
 import { Button } from "./components/ui/Button"
 import { NAV_ITEMS, GROUP_LABELS } from "./constants"
@@ -104,13 +111,20 @@ function MainLayout({ groupedNav, logout }) {
             <Route path="/dashboard" element={<DashboardPage />} />
             <Route path="/customers" element={<CustomersPage />} />
             <Route path="/subscriptions" element={<SubscriptionsPage />} />
+            <Route path="/referrals" element={<ReferralsPage />} />
+            <Route path="/notifications" element={<NotificationsPage />} />
+            <Route path="/tickets" element={<SupportTicketsPage />} />
             <Route path="/orders" element={<OrdersPage />} />
             <Route path="/schedule" element={<DeliverySchedulePage />} />
             <Route path="/forecast" element={<DemandForecastPage />} />
+            <Route path="/discounts" element={<DiscountsPage />} />
+            <Route path="/offers" element={<OffersPage />} />
+            <Route path="/free-sample" element={<FreeSamplePage />} />
             <Route path="/hubs" element={<HubsPage />} />
             <Route path="/routes" element={<RoutesPage />} />
             <Route path="/drivers" element={<DriversPage />} />
             <Route path="/wallet" element={<WalletPage />} />
+            <Route path="/autopay" element={<AutopayQueuePage />} />
             <Route path="/assets" element={<AssetTrackingPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />

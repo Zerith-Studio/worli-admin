@@ -107,7 +107,7 @@ export function useWalletStats() {
   const addCredit = useCallback(async (userId, amount, reason = 'Manual credit') => {
     try {
       const { data: wallet, error: walletError } = await supabase
-        .from('wallets').select('*').eq('user_id', userId).single();
+        .from('wallets').select('*').eq('user_id', userId).maybeSingle();
       if (walletError) throw walletError;
 
       const balanceBefore = wallet?.balance ?? 0;
