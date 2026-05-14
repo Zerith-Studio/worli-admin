@@ -8,6 +8,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
+import { withTimeout } from '../lib/query';
 
 export function useDrivers() {
   const [drivers, setDrivers] = useState([]);
@@ -28,10 +29,10 @@ export function useDrivers() {
       setError(null);
 
       // Fetch hubs and routes for assignment dropdowns
-      const [{ data: hubsData }, { data: routesData }] = await Promise.all([
+      const [{ data: hubsData }, { data: routesData }] = await withTimeout(Promise.all([
         supabase.from('hubs').select('id, name').eq('is_active', true).order('name'),
         supabase.from('routes').select('id, name, hub_id, hubs(name)').eq('is_active', true).order('name'),
-      ]);
+      ]));
       if (mountedRef.current) {
         setHubs(hubsData || []);
         setRoutes(routesData || []);

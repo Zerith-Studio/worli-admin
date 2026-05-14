@@ -1,48 +1,21 @@
 // ============================================
 // FILE: hooks/useDataRefresh.js
-// Fixed: removed double-fire (hooks own their initial load),
-// added mounted guard so stale intervals don't trigger state
-// updates on unmounted components.
+// Simple polling hook. Calls refreshFn on an interval
+// only when the tab is visible. Clean and minimal.
 // ============================================
 
-import { useEffect, useRef } from "react"
-import { REFRESH_INTERVAL } from "../constants"
+import { useEffect, useRef } from 'react';
 
-export function useDataRefresh(
-  refreshFn,
-  interval = REFRESH_INTERVAL,
-  enabled = true,
-) {
-  const mountedRef = useRef(true)
+export function useDataRefresh(refreshFn, interval = 60000) {
+  const fnRef = useRef(refreshFn);
+  fnRef.current = refreshFn; // always call latest version
 
   useEffect(() => {
-    mountedRef.current = true
-    return () => {
-      mountedRef.current = false
-    }
-  }, [])
-
-  useEffect(() => {
-    if (!enabled) {
-      console.log(`[useDataRefresh] not enabled`)
-      return
-    }
-
-    console.log(`[useDataRefresh] setting up setInterval for ${interval}ms`)
     const id = setInterval(() => {
-      console.log(
-        `[useDataRefresh] interval tick. mountedRef=${mountedRef.current}`,
-      )
-      if (mountedRef.current && document.visibilityState === "visible") {
-        refreshFn(true)
+      if (document.visibilityState === 'visible') {
+        fnRef.current(true); // true = background refresh (no loading spinner)
       }
-    }, interval)
-
-    return () => {
-      console.log(`[useDataRefresh] clearing interval`)
-      clearInterval(id)
-    }
-  }, [refreshFn, interval, enabled])
-
-  return { refresh: refreshFn }
+    }, interval);
+    return () => clearInterval(id);
+  }, [interval]);
 }

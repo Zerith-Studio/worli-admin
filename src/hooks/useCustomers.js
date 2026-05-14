@@ -1,12 +1,10 @@
 // ============================================
 // FILE: hooks/useCustomers.js
-// Fixed: wallet extraction (array vs object), dynamic
-// min_wallet_balance threshold from app_settings, mounted guard,
-// removed hardcoded zone filter (zone names come from DB).
 // ============================================
 
 import { useState, useEffect, useCallback, useRef } from "react"
 import { supabase } from "../lib/supabase"
+import { withTimeout } from "../lib/query"
 
 const PAGE_SIZE = 12
 
@@ -19,13 +17,7 @@ export function useCustomers() {
   const [minWalletBalance, setMinWalletBalance] = useState(100)
   const [filters, setFilters] = useState({ search: "", status: "all" })
   const mountedRef = useRef(true)
-
-  useEffect(() => {
-    mountedRef.current = true
-    return () => {
-      mountedRef.current = false
-    }
-  }, [])
+  useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
 
   const fetchCustomers = useCallback(async (isBackground = false) => {
     try {
@@ -36,19 +28,11 @@ export function useCustomers() {
       setError(null)
 
       // Fetch dynamic low-balance threshold
-      const { data: settingData } = await supabase
-        .from("app_settings")
-        .select("setting_value")
-        .eq("setting_key", "min_wallet_balance")
-        .maybeSingle()
+      const { data: settingData } = await withTimeout(
+        supabase.from("app_settings").select("setting_value").eq("setting_key", "min_wallet_balance").maybeSingle()
+      )
       const threshold = parseFloat(settingData?.setting_value || "100")
-      if (!mountedRef.current) {
-        console.log(
-          "[useCustomers] unmounted after app_settings fetch, aborting",
-        )
-        return
-      }
-      setMinWalletBalance(threshold)
+      if (mountedRef.current) setMinWalletBalance(threshold)
 
       let query = supabase.from("users").select(
         `
@@ -73,7 +57,7 @@ export function useCustomers() {
         data,
         error: fetchError,
         count,
-      } = await query.range(from, to).order("created_at", { ascending: false })
+      } = await withTimeout(query.range(from, to).order("created_at", { ascending: false }))
 
       if (fetchError) throw fetchError
       if (!mountedRef.current) {

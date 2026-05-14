@@ -6,6 +6,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
+import { withTimeout } from '../lib/query';
 
 export function useRoutes() {
   const [routes, setRoutes] = useState([]);
@@ -29,9 +30,9 @@ export function useRoutes() {
       const { data: hubsData } = await supabase.from('hubs').select('id, name').eq('is_active', true).order('name');
       if (mountedRef.current && hubsData) setHubs(hubsData);
 
-      const { data: routesData, error: routesError } = await supabase
-        .from('routes')
-        .select('*, hubs(name)');
+      const { data: routesData, error: routesError } = await withTimeout(
+        supabase.from('routes').select('*, hubs(name)')
+      );
       if (routesError) throw routesError;
 
       // Fetch today's rider assignments

@@ -6,6 +6,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
+import { withTimeout } from '../lib/query';
 
 const PAGE_SIZE = 20;
 
@@ -39,15 +40,11 @@ export function useWalletStats() {
       if (!mountedRef.current) return;
       setMinWalletBalance(threshold);
 
-      const { data: wallets, error: walletsError } = await supabase
-        .from('wallets')
-        .select('*, users!inner(full_name, phone_number)');
+      const [{ data: wallets, error: walletsError }, { data: subscriptions }] = await withTimeout(Promise.all([
+        supabase.from('wallets').select('*, users!inner(full_name, phone_number)'),
+        supabase.from('subscriptions').select('user_id').eq('status', 'active'),
+      ]));
       if (walletsError) throw walletsError;
-
-      const { data: subscriptions } = await supabase
-        .from('subscriptions')
-        .select('user_id')
-        .eq('status', 'active');
       const activeSubsCount = {};
       subscriptions?.forEach(sub => {
         activeSubsCount[sub.user_id] = (activeSubsCount[sub.user_id] || 0) + 1;

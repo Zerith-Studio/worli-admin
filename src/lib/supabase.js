@@ -1,6 +1,8 @@
 // ============================================
 // FILE: lib/supabase.js
 // Admin Dashboard Supabase Client
+// Lock bypass prevents gotrue from hanging queries
+// during silent token refresh (the infinite spinner bug).
 // ============================================
 
 import { createClient } from "@supabase/supabase-js"
@@ -17,38 +19,9 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: false,
+    // Bypass the Web Locks API. This prevents the gotrue client from
+    // deadlocking concurrent requests during a silent token refresh,
+    // which is the root cause of the "infinite spinner after inactivity" bug.
+    lock: (name, acquireTimeout, fn) => fn(),
   },
 })
-
-// Helper to check if user is admin
-export const isAdmin = async () => {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-  if (!user) return false
-
-  const { data, error } = await supabase
-    .from("admins")
-    .select("id")
-    .eq("id", user.id)
-    .maybeSingle()
-
-  return !!data && !error
-}
-
-// RPC helper for admin check (uses the is_admin() function in DB)
-export const checkIsAdminRPC = async () => {
-  console.log("[Supabase] checkIsAdminRPC called")
-  try {
-    const { data, error } = await supabase.rpc("is_admin")
-    console.log("[Supabase] checkIsAdminRPC result:", { data, error })
-    if (error) {
-      console.error("[Supabase] checkIsAdminRPC error:", error)
-      return false
-    }
-    return !!data
-  } catch (err) {
-    console.error("[Supabase] checkIsAdminRPC exception:", err)
-    return false
-  }
-}

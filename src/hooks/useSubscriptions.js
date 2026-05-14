@@ -6,6 +6,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react"
 import { supabase } from "../lib/supabase"
+import { withTimeout } from "../lib/query"
 
 const PAGE_SIZE = 15
 
@@ -81,7 +82,7 @@ export function useSubscriptions() {
         data,
         error: fetchError,
         count,
-      } = await query.range(from, to).order("created_at", { ascending: false })
+      } = await withTimeout(query.range(from, to).order("created_at", { ascending: false }))
 
       if (fetchError) throw fetchError
       if (!mountedRef.current) return
