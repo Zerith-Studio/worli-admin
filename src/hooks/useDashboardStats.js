@@ -47,28 +47,39 @@ export function useDashboardStats() {
         setStats((prev) => ({ ...prev, error: null }))
       }
 
-      // Fetch total customers
-      const { count: totalCustomers, error: customersError } = await supabase
-        .from("users")
-        .select("*", { count: "exact", head: true })
+      // Calculate week dates for the chart
+      const weekDates = Array.from({ length: 7 }, (_, i) => {
+        const d = new Date()
+        d.setDate(d.getDate() - (6 - i))
+        return d.toISOString().split("T")[0]
+      })
+
+      // Use Promise.all to fetch data in parallel
+      const [
+        { count: totalCustomers, error: customersError },
+        { count: activeSubscriptions, error: subsError },
+        { data: todayOrdersData, error: ordersError },
+        { data: walletData, error: walletError },
+        { count: pausedCustomers, error: pausedError },
+        { data: zoneOrdersData, error: zoneError },
+        { data: weekOrders, error: weekError },
+      ] = await Promise.all([
+        supabase.from("users").select("*", { count: "exact", head: true }),
+        supabase.from("subscriptions").select("*", { count: "exact", head: true }).eq("status", "active"),
+        supabase.from("orders").select("status, amount").eq("delivery_date", TODAY),
+        supabase.from("wallets").select("balance"),
+        supabase.from("subscriptions").select("user_id", { count: "exact", head: true }).eq("status", "paused"),
+        supabase.from("orders").select(`status, addresses!inner ( city )`).eq("delivery_date", TODAY),
+        supabase.from("orders").select("delivery_date").eq("status", "delivered").gte("delivery_date", weekDates[0]).lte("delivery_date", weekDates[6])
+      ]);
 
       if (customersError) throw customersError
-
-      // Fetch active subscriptions
-      const { count: activeSubscriptions, error: subsError } = await supabase
-        .from("subscriptions")
-        .select("*", { count: "exact", head: true })
-        .eq("status", "active")
-
       if (subsError) throw subsError
-
-      // Fetch today's orders
-      const { data: todayOrdersData, error: ordersError } = await supabase
-        .from("orders")
-        .select("status, amount")
-        .eq("delivery_date", TODAY)
-
       if (ordersError) throw ordersError
+      if (walletError) throw walletError
+      if (pausedError) throw pausedError
+      if (zoneError) throw zoneError
+      if (weekError) throw weekError
 
       const todayOrders = todayOrdersData || []
       const todayDelivered = todayOrders.filter(
@@ -88,42 +99,12 @@ export function useDashboardStats() {
         ? Math.round((todayDelivered / todayOrders.length) * 100)
         : 0
 
-      // Fetch customers with low/negative balance
-      const { data: walletData, error: walletError } = await supabase
-        .from("wallets")
-        .select("balance")
-
-      if (walletError) throw walletError
-
       const lowBalanceCount =
         walletData?.filter((w) => (w.balance || 0) < 0).length || 0
       const atRiskCustomers =
         walletData?.filter(
           (w) => (w.balance || 0) >= 0 && (w.balance || 0) < 200,
         ).length || 0
-
-      // Fetch paused customers
-      const { count: pausedCustomers, error: pausedError } = await supabase
-        .from("subscriptions")
-        .select("user_id", { count: "exact", head: true })
-        .eq("status", "paused")
-
-      if (pausedError) throw pausedError
-
-      // Fetch zone stats (requires orders joined with addresses)
-      const { data: zoneOrdersData, error: zoneError } = await supabase
-        .from("orders")
-        .select(
-          `
-          status,
-          addresses!inner (
-            city
-          )
-        `,
-        )
-        .eq("delivery_date", TODAY)
-
-      if (zoneError) throw zoneError
 
       // Group by city/zone
       const zoneMap = {}
@@ -143,22 +124,6 @@ export function useDashboardStats() {
         total: stats.total,
         done: stats.done,
       }))
-
-      // Fetch week data (last 7 days delivered orders)
-      const weekDates = Array.from({ length: 7 }, (_, i) => {
-        const d = new Date()
-        d.setDate(d.getDate() - (6 - i))
-        return d.toISOString().split("T")[0]
-      })
-
-      const { data: weekOrders, error: weekError } = await supabase
-        .from("orders")
-        .select("delivery_date")
-        .eq("status", "delivered")
-        .gte("delivery_date", weekDates[0])
-        .lte("delivery_date", weekDates[6])
-
-      if (weekError) throw weekError
 
       const weekMap = {}
       weekDates.forEach((d) => (weekMap[d] = 0))
