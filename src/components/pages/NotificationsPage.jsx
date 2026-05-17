@@ -1,96 +1,517 @@
-import React, { useState, useEffect } from "react"
+// ============================================================
+// FILE: src/components/pages/NotificationsPage.jsx
+// Admin Dashboard — Rich Push Notification Composer & History
+// ============================================================
+
+import React, { useState, useEffect, useCallback } from "react"
 import { supabase } from "../../lib/supabase"
 import { Button } from "../ui/Button"
 import { Modal } from "../ui/Modal"
 
-export function NotificationsPage() {
-  const [notifications, setNotifications] = useState([])
-  const [isModalOpen, setIsModalOpen] = useState(false)
-  const [formData, setFormData] = useState({ title: "", message: "", user_id: "" })
-  const [sending, setSending] = useState(false)
+// ─── Notification type badge colors ──────────────────────────
+const TYPE_COLORS = {
+  general: { bg: "#E8F4FD", text: "#1A6FA8" },
+  order: { bg: "#E8F5E9", text: "#2E7D32" },
+  subscription: { bg: "#FFF3E0", text: "#E65100" },
+  low_bottles: { bg: "#FBE9E7", text: "#BF360C" },
+}
 
-  useEffect(() => {
-    fetchNotifications()
+const TARGET_LABELS = {
+  all: "All Users",
+  specific: "Specific Users",
+  segment: "Segment",
+}
+
+// ─── Preview Card Component ───────────────────────────────────
+function NotificationPreview({ title, body, imageUrl }) {
+  return (
+    <div style={{
+      border: "1px solid #E5E7EB",
+      borderRadius: 12,
+      overflow: "hidden",
+      background: "#FAFAFA",
+      boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
+    }}>
+      <div style={{ padding: "8px 12px", background: "#1A1A2E", display: "flex", alignItems: "center", gap: 8 }}>
+        <div style={{ width: 20, height: 20, borderRadius: 4, background: "#101B53", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <span style={{ fontSize: 10, color: "white" }}>W</span>
+        </div>
+        <span style={{ color: "#9CA3AF", fontSize: 11 }}>Worli Dairy · now</span>
+      </div>
+      {imageUrl && (
+        <img
+          src={imageUrl}
+          alt="Notification"
+          style={{ width: "100%", maxHeight: 150, objectFit: "cover" }}
+          onError={(e) => { e.target.style.display = "none" }}
+        />
+      )}
+      <div style={{ padding: "12px 14px" }}>
+        <div style={{ fontWeight: 700, fontSize: 14, color: "#111", marginBottom: 4 }}>
+          {title || "Notification Title"}
+        </div>
+        <div style={{ fontSize: 13, color: "#444", lineHeight: 1.5 }}>
+          {body || "Your notification message will appear here."}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── User Search Component ────────────────────────────────────
+function UserSearch({ selectedUsers, onSelectionChange }) {
+  const [search, setSearch] = useState("")
+  const [results, setResults] = useState([])
+  const [searching, setSearching] = useState(false)
+
+  const handleSearch = useCallback(async (q) => {
+    if (!q || q.length < 2) { setResults([]); return }
+    setSearching(true)
+    const { data } = await supabase
+      .from("users")
+      .select("id, full_name, phone_number, expo_push_token")
+      .or(`full_name.ilike.%${q}%,phone_number.ilike.%${q}%`)
+      .limit(10)
+    setResults(data || [])
+    setSearching(false)
   }, [])
 
-  const fetchNotifications = async () => {
-    const { data } = await supabase.from("notifications").select("*, users(full_name, phone_number)").order("created_at", { ascending: false }).limit(100)
-    setNotifications(data || [])
+  useEffect(() => {
+    const t = setTimeout(() => handleSearch(search), 300)
+    return () => clearTimeout(t)
+  }, [search, handleSearch])
+
+  const toggle = (user) => {
+    const exists = selectedUsers.find((u) => u.id === user.id)
+    onSelectionChange(
+      exists ? selectedUsers.filter((u) => u.id !== user.id) : [...selectedUsers, user]
+    )
   }
 
+  return (
+    <div>
+      <input
+        className="form-input"
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        placeholder="Search by name or phone..."
+        style={{ marginBottom: 8 }}
+      />
+      {searching && <div style={{ fontSize: 12, color: "var(--text-3)", marginBottom: 6 }}>Searching…</div>}
+      {results.length > 0 && (
+        <div style={{
+          border: "1px solid var(--border)",
+          borderRadius: 8,
+          overflow: "hidden",
+          marginBottom: 8,
+          maxHeight: 200,
+          overflowY: "auto",
+        }}>
+          {results.map((u) => {
+            const selected = !!selectedUsers.find((s) => s.id === u.id)
+            const hasToken = !!u.expo_push_token
+            return (
+              <div
+                key={u.id}
+                onClick={() => hasToken && toggle(u)}
+                style={{
+                  padding: "8px 12px",
+                  cursor: hasToken ? "pointer" : "not-allowed",
+                  background: selected ? "rgba(16,27,83,0.07)" : "white",
+                  borderBottom: "1px solid var(--border)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  opacity: hasToken ? 1 : 0.5,
+                }}
+              >
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: 13 }}>{u.full_name || "—"}</div>
+                  <div style={{ fontSize: 12, color: "var(--text-3)" }}>{u.phone_number}</div>
+                </div>
+                <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                  {!hasToken && <span style={{ fontSize: 11, color: "#F59E0B", background: "#FEF3C7", padding: "1px 6px", borderRadius: 4 }}>No token</span>}
+                  {selected && <span style={{ fontSize: 18, color: "var(--green)" }}>✓</span>}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+      {selectedUsers.length > 0 && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+          {selectedUsers.map((u) => (
+            <div key={u.id} style={{
+              background: "var(--bg-accent)",
+              border: "1px solid var(--border)",
+              borderRadius: 20,
+              padding: "3px 10px",
+              fontSize: 12,
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+            }}>
+              {u.full_name || u.phone_number}
+              <span
+                onClick={() => toggle(u)}
+                style={{ cursor: "pointer", color: "var(--red)", fontWeight: 700 }}
+              >×</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Main Page ────────────────────────────────────────────────
+export function NotificationsPage() {
+  const [notifications, setNotifications] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [isModalOpen, setIsModalOpen] = useState(false)
+  const [sending, setSending] = useState(false)
+  const [sendResult, setSendResult] = useState(null)
+
+  const defaultForm = {
+    title: "",
+    body: "",
+    image_url: "",
+    deep_link: "",
+    notification_type: "general",
+    channel: "default",
+    target: "all",         // "all" | "specific"
+    selectedUsers: [],
+  }
+  const [form, setForm] = useState(defaultForm)
+
+  const updateForm = (patch) => setForm((prev) => ({ ...prev, ...patch }))
+
+  // ── Fetch sent history ──────────────────────────────────────
+  const fetchHistory = async () => {
+    setLoading(true)
+    const { data } = await supabase
+      .from("push_notifications")
+      .select("*, admins(email)")
+      .order("created_at", { ascending: false })
+      .limit(50)
+    setNotifications(data || [])
+    setLoading(false)
+  }
+
+  useEffect(() => { fetchHistory() }, [])
+
+  // ── Send notification ───────────────────────────────────────
   const handleSend = async () => {
+    if (!form.title.trim() || !form.body.trim()) {
+      alert("Title and message are required.")
+      return
+    }
+    if (form.target === "specific" && form.selectedUsers.length === 0) {
+      alert("Please select at least one user.")
+      return
+    }
+
     setSending(true)
-    const { title, message, user_id } = formData
-    try {
-      if (user_id) {
-         await supabase.from("notifications").insert([{ title, message, user_id, type: "system" }])
-      } else {
-         const { data: users } = await supabase.from("users").select("id")
-         const notifs = users.map(u => ({ title, message, user_id: u.id, type: "system" }))
-         // bulk insert
-         await supabase.from("notifications").insert(notifs)
-      }
+    setSendResult(null)
+
+    const body = {
+      title: form.title,
+      message: form.body,
+      image_url: form.image_url || undefined,
+      deep_link: form.deep_link || undefined,
+      notification_type: form.notification_type,
+      channel: form.channel,
+      user_ids: form.target === "specific" ? form.selectedUsers.map((u) => u.id) : undefined,
+    }
+
+    const { data, error } = await supabase.functions.invoke("send-push-notification", { body })
+
+    setSending(false)
+    if (error || !data?.success) {
+      setSendResult({ ok: false, msg: data?.error ?? error?.message ?? "Unknown error" })
+    } else {
+      setSendResult({ ok: true, sent: data.sent, failed: data.failed })
       setIsModalOpen(false)
-      fetchNotifications()
-    } catch (e) {
-      alert("Error sending: " + e.message)
-    } finally {
-      setSending(false)
+      setForm(defaultForm)
+      fetchHistory()
+    }
+  }
+
+  // ── Quick actions ───────────────────────────────────────────
+  const handleNotifyLowBottles = async () => {
+    if (!window.confirm("Send low-bottles notifications to all eligible users?")) return
+    setSending(true)
+    const { data, error } = await supabase.functions.invoke("notify-low-bottles", { body: {} })
+    setSending(false)
+    if (error || !data?.success) {
+      alert("Error: " + (data?.error ?? error?.message))
+    } else {
+      alert(`✅ Notified ${data.notified} users (${data.failed ?? 0} failed)`)
+      fetchHistory()
     }
   }
 
   return (
     <div>
-      <div className="page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      {/* Header */}
+      <div className="page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
         <div>
           <div className="page-title">Notifications</div>
-          <div className="page-sub">Send and view alerts</div>
+          <div className="page-sub">Send push notifications to users</div>
         </div>
-        <Button onClick={() => setIsModalOpen(true)} variant="primary">Send Notification</Button>
+        <div style={{ display: "flex", gap: 10 }}>
+          <Button
+            onClick={handleNotifyLowBottles}
+            variant="secondary"
+            disabled={sending}
+            title="Sends low-bottle alerts to all users below the threshold"
+          >
+            🥛 Alert Low-Bottle Users
+          </Button>
+          <Button onClick={() => { setIsModalOpen(true); setSendResult(null) }} variant="primary">
+            + Send Notification
+          </Button>
+        </div>
       </div>
+
+      {/* Sent history */}
       <div className="card">
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>Date</th>
-              <th>User</th>
-              <th>Title</th>
-              <th>Message</th>
-              <th>Read</th>
-            </tr>
-          </thead>
-          <tbody>
-            {notifications.map((n) => (
-              <tr key={n.id}>
-                <td>{new Date(n.created_at).toLocaleString()}</td>
-                <td>{n.user_id ? (n.users?.full_name || n.users?.phone_number || n.user_id) : "All Users"}</td>
-                <td>{n.title}</td>
-                <td>{n.message}</td>
-                <td>{n.is_read ? "Yes" : "No"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      {isModalOpen && (
-        <Modal title="Send Notification" onClose={() => setIsModalOpen(false)} footer={
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
-            <Button variant="secondary" onClick={() => setIsModalOpen(false)}>Cancel</Button>
-            <Button variant="primary" onClick={handleSend} disabled={sending}>{sending ? "Sending..." : "Send"}</Button>
+        {loading ? (
+          <div style={{ padding: 24, textAlign: "center", color: "var(--text-3)" }}>Loading…</div>
+        ) : notifications.length === 0 ? (
+          <div style={{ padding: 32, textAlign: "center", color: "var(--text-3)" }}>
+            No notifications sent yet. Click "Send Notification" to get started.
           </div>
-        }>
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <div className="form-group">
-              <label className="form-label">User ID (Leave empty for All Users)</label>
-              <input className="form-input" value={formData.user_id} onChange={e => setFormData({...formData, user_id: e.target.value})} placeholder="UUID" />
+        ) : (
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Title</th>
+                <th>Message</th>
+                <th>Target</th>
+                <th>Sent</th>
+                <th>Failed</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {notifications.map((n) => {
+                const typeColor = TYPE_COLORS[n.data?.notification_type] ?? TYPE_COLORS.general
+                return (
+                  <tr key={n.id}>
+                    <td style={{ whiteSpace: "nowrap", fontSize: 12 }}>
+                      {new Date(n.created_at).toLocaleString("en-IN", {
+                        day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit",
+                      })}
+                    </td>
+                    <td style={{ fontWeight: 600 }}>{n.title}</td>
+                    <td style={{ maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {n.body}
+                    </td>
+                    <td>
+                      <span style={{
+                        background: typeColor.bg,
+                        color: typeColor.text,
+                        padding: "2px 8px",
+                        borderRadius: 12,
+                        fontSize: 12,
+                        fontWeight: 600,
+                      }}>
+                        {TARGET_LABELS[n.target_type] ?? n.target_type}
+                      </span>
+                    </td>
+                    <td style={{ color: "var(--green)", fontWeight: 700 }}>{n.sent_count}</td>
+                    <td style={{ color: n.failed_count > 0 ? "var(--red)" : "var(--text-3)" }}>
+                      {n.failed_count}
+                    </td>
+                    <td>
+                      <span style={{
+                        padding: "2px 8px",
+                        borderRadius: 12,
+                        fontSize: 12,
+                        fontWeight: 600,
+                        background: n.status === "sent" ? "#E8F5E9" : n.status === "failed" ? "#FFEBEE" : "#FFF8E1",
+                        color: n.status === "sent" ? "#2E7D32" : n.status === "failed" ? "#C62828" : "#F57F17",
+                      }}>
+                        {n.status}
+                      </span>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* Send Modal */}
+      {isModalOpen && (
+        <Modal
+          title="Send Push Notification"
+          onClose={() => { setIsModalOpen(false); setSendResult(null) }}
+          footer={
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%" }}>
+              <div style={{ fontSize: 13, color: "var(--text-3)" }}>
+                {form.target === "all"
+                  ? "📢 Will send to all users with push tokens"
+                  : `👤 ${form.selectedUsers.length} user${form.selectedUsers.length === 1 ? "" : "s"} selected`}
+              </div>
+              <div style={{ display: "flex", gap: 10 }}>
+                <Button variant="secondary" onClick={() => { setIsModalOpen(false); setSendResult(null) }}>Cancel</Button>
+                <Button variant="primary" onClick={handleSend} disabled={sending}>
+                  {sending ? "Sending…" : "Send Now"}
+                </Button>
+              </div>
             </div>
-            <div className="form-group">
-              <label className="form-label">Title</label>
-              <input className="form-input" value={formData.title} onChange={e => setFormData({...formData, title: e.target.value})} />
+          }
+        >
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 280px", gap: 24, minHeight: 400 }}>
+            {/* Left: Form */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+
+              {/* Target */}
+              <div className="form-group">
+                <label className="form-label">Target Audience</label>
+                <div style={{ display: "flex", gap: 8 }}>
+                  {["all", "specific"].map((t) => (
+                    <button
+                      key={t}
+                      onClick={() => updateForm({ target: t, selectedUsers: [] })}
+                      style={{
+                        padding: "6px 16px",
+                        borderRadius: 20,
+                        border: "2px solid",
+                        borderColor: form.target === t ? "var(--primary)" : "var(--border)",
+                        background: form.target === t ? "var(--primary)" : "transparent",
+                        color: form.target === t ? "white" : "var(--text-2)",
+                        cursor: "pointer",
+                        fontWeight: 600,
+                        fontSize: 13,
+                      }}
+                    >
+                      {t === "all" ? "📢 All Users" : "👤 Specific Users"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* User search */}
+              {form.target === "specific" && (
+                <div className="form-group">
+                  <label className="form-label">Search Users</label>
+                  <UserSearch
+                    selectedUsers={form.selectedUsers}
+                    onSelectionChange={(users) => updateForm({ selectedUsers: users })}
+                  />
+                </div>
+              )}
+
+              {/* Title */}
+              <div className="form-group">
+                <label className="form-label">Title *</label>
+                <input
+                  className="form-input"
+                  value={form.title}
+                  onChange={(e) => updateForm({ title: e.target.value })}
+                  placeholder="e.g. 🚚 Your order is on the way!"
+                  maxLength={100}
+                />
+                <div style={{ fontSize: 11, color: "var(--text-3)", marginTop: 3 }}>{form.title.length}/100</div>
+              </div>
+
+              {/* Body */}
+              <div className="form-group">
+                <label className="form-label">Message *</label>
+                <textarea
+                  className="form-input"
+                  value={form.body}
+                  onChange={(e) => updateForm({ body: e.target.value })}
+                  placeholder="Your notification message…"
+                  rows={3}
+                  maxLength={300}
+                />
+                <div style={{ fontSize: 11, color: "var(--text-3)", marginTop: 3 }}>{form.body.length}/300</div>
+              </div>
+
+              {/* Image URL */}
+              <div className="form-group">
+                <label className="form-label">Image URL <span style={{ color: "var(--text-3)", fontWeight: 400 }}>(optional — for rich notification)</span></label>
+                <input
+                  className="form-input"
+                  value={form.image_url}
+                  onChange={(e) => updateForm({ image_url: e.target.value })}
+                  placeholder="https://..."
+                />
+              </div>
+
+              {/* Deep link */}
+              <div className="form-group">
+                <label className="form-label">Deep Link / Screen <span style={{ color: "var(--text-3)", fontWeight: 400 }}>(optional)</span></label>
+                <input
+                  className="form-input"
+                  value={form.deep_link}
+                  onChange={(e) => updateForm({ deep_link: e.target.value })}
+                  placeholder="worli-dairy://wallet  or  /product"
+                />
+              </div>
+
+              {/* Type + Channel */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <div className="form-group">
+                  <label className="form-label">Type</label>
+                  <select
+                    className="form-input"
+                    value={form.notification_type}
+                    onChange={(e) => updateForm({ notification_type: e.target.value })}
+                  >
+                    <option value="general">General</option>
+                    <option value="order">Order</option>
+                    <option value="subscription">Subscription</option>
+                    <option value="low_bottles">Low Bottles</option>
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Android Channel</label>
+                  <select
+                    className="form-input"
+                    value={form.channel}
+                    onChange={(e) => updateForm({ channel: e.target.value })}
+                  >
+                    <option value="default">Default</option>
+                    <option value="orders">Orders (High priority)</option>
+                    <option value="bottles">Bottles (Normal)</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Send result */}
+              {sendResult && (
+                <div style={{
+                  padding: "12px 16px",
+                  borderRadius: 8,
+                  background: sendResult.ok ? "#E8F5E9" : "#FFEBEE",
+                  color: sendResult.ok ? "#2E7D32" : "#C62828",
+                  fontWeight: 600,
+                  fontSize: 13,
+                }}>
+                  {sendResult.ok
+                    ? `✅ Sent to ${sendResult.sent} device${sendResult.sent === 1 ? "" : "s"}${sendResult.failed > 0 ? ` (${sendResult.failed} failed)` : ""}`
+                    : `❌ Error: ${sendResult.msg}`}
+                </div>
+              )}
             </div>
-            <div className="form-group">
-              <label className="form-label">Message</label>
-              <textarea className="form-input" value={formData.message} onChange={e => setFormData({...formData, message: e.target.value})} />
+
+            {/* Right: Preview */}
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-3)", marginBottom: 10, textTransform: "uppercase", letterSpacing: 1 }}>
+                Preview
+              </div>
+              <NotificationPreview title={form.title} body={form.body} imageUrl={form.image_url} />
+              <div style={{ marginTop: 12, fontSize: 11, color: "var(--text-3)", lineHeight: 1.6 }}>
+                📱 Actual appearance varies by device and OS version.
+                {form.image_url && " Image requires a publicly accessible URL."}
+              </div>
             </div>
           </div>
         </Modal>
