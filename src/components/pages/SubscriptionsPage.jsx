@@ -100,6 +100,8 @@ export function SubscriptionsPage() {
                 <th>Type</th>
                 <th>Qty</th>
                 <th>Price/day</th>
+                <th>Duration</th>
+                <th>Date Range</th>
                 <th>City</th>
                 <th>Status</th>
                 <th>Actions</th>
@@ -125,6 +127,13 @@ export function SubscriptionsPage() {
                     {s.discountAmount > 0 && (
                       <span style={{ color: 'var(--green)', fontSize: 11, marginLeft: 4 }}>-₹{s.discountAmount}</span>
                     )}
+                  </td>
+                  <td style={{ fontSize: 11.5, color: 'var(--text-3)' }}>
+                    {s.durationMonths ? `${s.durationMonths}mo` : '—'}
+                  </td>
+                  <td style={{ fontSize: 11, color: 'var(--text-3)', whiteSpace: 'nowrap' }}>
+                    {s.startDate ? fmtDate(s.startDate) : '—'}
+                    {s.endDate ? <span> → {fmtDate(s.endDate)}</span> : ''}
                   </td>
                   <td style={{ fontSize: 11.5, color: 'var(--text-3)' }}>{s.city}</td>
                   <td>

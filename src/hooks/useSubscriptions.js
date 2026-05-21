@@ -101,11 +101,12 @@ export function useSubscriptions() {
           type: sub.frequency || 'daily',
           status: sub.status || 'active',
           startDate: sub.start_date,
+          endDate: sub.end_date,
+          durationMonths: sub.duration_months,
           price: (sub.products?.price || 0) * (sub.quantity || 1),
           discountAmount: sub.discount_amount || 0,
           remainingBottles: sub.remaining_bottles,
           intervalDays: sub.interval_days,
-          pausedDates: sub.paused_dates || [],
           activePause: null, // filled below for paused subs
         })) || []
 

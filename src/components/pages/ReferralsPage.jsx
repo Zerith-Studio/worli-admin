@@ -16,7 +16,7 @@ export function ReferralsPage() {
     try {
       const { data, error } = await supabase
         .from("referrals")
-        .select("*, referrer:users!referrer_id(full_name, phone_number), referee:users!referee_id(full_name, phone_number)")
+        .select("*, referral_code, referrer:users!referrer_id(full_name, phone_number), referee:users!referee_id(full_name, phone_number)")
         .order("created_at", { ascending: false })
       if (error) throw error
       setReferrals(data || [])
@@ -40,6 +40,7 @@ export function ReferralsPage() {
           <thead>
             <tr>
               <th>Date</th>
+              <th>Code</th>
               <th>Referrer</th>
               <th>Referee</th>
               <th>Reward (Referrer)</th>
@@ -51,6 +52,7 @@ export function ReferralsPage() {
             {referrals.map((ref) => (
               <tr key={ref.id}>
                 <td>{new Date(ref.created_at).toLocaleDateString()}</td>
+                <td><code style={{ fontSize: 11, background: 'var(--bg)', padding: '2px 6px', borderRadius: 4 }}>{ref.referral_code || '—'}</code></td>
                 <td>{ref.referrer?.full_name || ref.referrer?.phone_number}</td>
                 <td>{ref.referee?.full_name || ref.referee?.phone_number}</td>
                 <td>₹{ref.referrer_reward_amount}</td>

@@ -64,7 +64,7 @@ export function AddressesPage() {
       let query = supabase
         .from("addresses")
         .select(
-          `id, name, address_line1, address_line2, landmark, city, pincode,
+          `id, name, address_line1, address_line2, landmark, city, state, pincode,
            is_default, delivery_instructions, created_at,
            user_id,
            users!inner(full_name, phone_number),
@@ -252,6 +252,7 @@ export function AddressesPage() {
                         <td>
                           <div style={{ fontWeight: 500 }}>{addr.users?.full_name || "—"}</div>
                           <div style={{ fontSize: 11, color: "var(--text-3)" }}>{addr.users?.phone_number}</div>
+                          {addr.name && <div style={{ fontSize: 10.5, color: 'var(--accent)', fontWeight: 500, marginTop: 2 }}>{addr.name}</div>}
                           {addr.is_default && <Badge variant="info" style={{ fontSize: 10 }}>Default</Badge>}
                         </td>
                         <td>
@@ -309,9 +310,15 @@ export function AddressesPage() {
         {assignTarget && (
           <div className="card" style={{ width: 300, flexShrink: 0, position: "sticky", top: 80 }}>
             <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>Assign Route Stop</div>
-            <div style={{ fontSize: 11.5, color: "var(--text-3)", marginBottom: 14 }}>
-              {assignTarget.address_line1}{assignTarget.city ? `, ${assignTarget.city}` : ""}
+            <div style={{ fontSize: 11.5, color: "var(--text-3)", marginBottom: 4 }}>
+              {assignTarget.name ? <strong>{assignTarget.name}</strong> : null}
+              {assignTarget.name ? ' · ' : ''}{assignTarget.address_line1}{assignTarget.city ? `, ${assignTarget.city}` : ""}
             </div>
+            {assignTarget.delivery_instructions && (
+              <div style={{ fontSize: 11, color: 'var(--yellow)', background: 'var(--yellow-bg)', borderRadius: 5, padding: '5px 10px', marginBottom: 10 }}>
+                📋 {assignTarget.delivery_instructions}
+              </div>
+            )}
 
             {assignMsg && (
               <div style={{

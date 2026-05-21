@@ -102,6 +102,7 @@ export function WalletPage() {
               <tr>
                 <th>Customer</th>
                 <th>Wallet Balance</th>
+                <th>Reserved</th>
                 <th>Balance Bar</th>
                 <th>Risk Level</th>
                 <th>Active Subs</th>
@@ -125,6 +126,11 @@ export function WalletPage() {
                         color: c.balance < 0 ? 'var(--red)' : c.balance < minWalletBalance ? 'var(--yellow)' : 'var(--green)',
                       }}>
                         ₹{c.balance.toLocaleString()}
+                      </span>
+                    </td>
+                    <td>
+                      <span style={{ fontFamily: "'DM Mono',monospace", fontSize: 12, color: 'var(--text-3)' }}>
+                        🔒 ₹{(c.reservedBalance || 0).toLocaleString()}
                       </span>
                     </td>
                     <td style={{ minWidth: 100 }}>

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useSettings } from '../../hooks/useSettings';
+import { supabase } from '../../lib/supabase';
 import { Button } from '../ui/Button';
-import { Toggle } from '../ui/Toggle';
 import { LoadingSpinner } from '../ui/LoadingSpinner';
 
 export function SettingsPage() {
@@ -14,10 +14,21 @@ export function SettingsPage() {
   } = useSettings();
 
   const [localSettings, setLocalSettings] = useState({});
+  const [durationDiscounts, setDurationDiscounts] = useState([]);
+  const [discountSaving, setDiscountSaving] = useState(false);
+  const [discountMsg, setDiscountMsg] = useState(null);
 
   useEffect(() => {
     setLocalSettings(settings);
   }, [settings]);
+
+  useEffect(() => {
+    supabase
+      .from('subscription_duration_discounts')
+      .select('*')
+      .order('duration_months')
+      .then(({ data }) => { if (data) setDurationDiscounts(data); });
+  }, []);
 
   const updateLocal = (key, val) => {
     setLocalSettings(prev => ({ ...prev, [key]: val }));
@@ -25,6 +36,35 @@ export function SettingsPage() {
 
   const handleSave = async () => {
     await updateSettings(localSettings);
+  };
+
+  const handleDiscountChange = (id, field, value) => {
+    setDurationDiscounts(prev =>
+      prev.map(d => d.id === id ? { ...d, [field]: value } : d)
+    );
+  };
+
+  const handleSaveDiscounts = async () => {
+    setDiscountSaving(true);
+    setDiscountMsg(null);
+    try {
+      for (const d of durationDiscounts) {
+        const { error: err } = await supabase
+          .from('subscription_duration_discounts')
+          .update({
+            discount_percent: parseFloat(d.discount_percent) || 0,
+            display_label: d.display_label,
+            is_active: d.is_active,
+          })
+          .eq('id', d.id);
+        if (err) throw err;
+      }
+      setDiscountMsg({ ok: true, text: 'Duration discounts saved ✓' });
+    } catch (err) {
+      setDiscountMsg({ ok: false, text: err.message });
+    } finally {
+      setDiscountSaving(false);
+    }
   };
 
   if (loading) {
@@ -139,6 +179,79 @@ export function SettingsPage() {
           {saving ? 'Saving...' : 'Save All Settings'}
         </Button>
         <Button onClick={() => setLocalSettings(settings)}>Discard Changes</Button>
+      </div>
+
+      {/* Subscription Duration Discounts */}
+      <div className="card" style={{ marginTop: 24 }}>
+        <div className="card-title">
+          Subscription Duration Discounts
+          <span style={{ fontSize: 12, fontWeight: 400, color: 'var(--text-3)', marginLeft: 8 }}>
+            Shown to customers during checkout when selecting 1/3/6-month plans
+          </span>
+        </div>
+        {discountMsg && (
+          <div style={{
+            padding: '8px 12px', borderRadius: 6, marginBottom: 12, fontSize: 13,
+            background: discountMsg.ok ? 'rgba(34,197,94,0.1)' : 'var(--red-bg)',
+            color: discountMsg.ok ? 'var(--green)' : 'var(--red)',
+          }}>
+            {discountMsg.text}
+          </div>
+        )}
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr>
+              {['Duration', 'Display Label', 'Discount %', 'Active'].map(h => (
+                <th key={h} style={{ textAlign: 'left', padding: '8px 12px', fontSize: 12, color: 'var(--text-3)', fontWeight: 600, borderBottom: '1px solid var(--border)' }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {durationDiscounts.length === 0 && (
+              <tr><td colSpan={4} style={{ padding: 16, color: 'var(--text-4)', textAlign: 'center' }}>No duration discounts configured in database</td></tr>
+            )}
+            {durationDiscounts.map(d => (
+              <tr key={d.id}>
+                <td style={{ padding: '8px 12px', fontFamily: "'DM Mono',monospace", fontWeight: 600 }}>
+                  {d.duration_months} month{d.duration_months > 1 ? 's' : ''}
+                </td>
+                <td style={{ padding: '8px 12px' }}>
+                  <input
+                    className="form-input"
+                    style={{ width: 140 }}
+                    value={d.display_label || ''}
+                    onChange={e => handleDiscountChange(d.id, 'display_label', e.target.value)}
+                  />
+                </td>
+                <td style={{ padding: '8px 12px' }}>
+                  <input
+                    type="number"
+                    className="form-input"
+                    style={{ width: 80 }}
+                    min="0"
+                    max="100"
+                    step="0.5"
+                    value={d.discount_percent}
+                    onChange={e => handleDiscountChange(d.id, 'discount_percent', e.target.value)}
+                  />
+                  <span style={{ marginLeft: 6, fontSize: 13, color: 'var(--text-3)' }}>%</span>
+                </td>
+                <td style={{ padding: '8px 12px' }}>
+                  <input
+                    type="checkbox"
+                    checked={d.is_active}
+                    onChange={e => handleDiscountChange(d.id, 'is_active', e.target.checked)}
+                  />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div style={{ marginTop: 12 }}>
+          <Button variant="primary" onClick={handleSaveDiscounts} disabled={discountSaving || durationDiscounts.length === 0}>
+            {discountSaving ? 'Saving...' : 'Save Duration Discounts'}
+          </Button>
+        </div>
       </div>
     </div>
   );

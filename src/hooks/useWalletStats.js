@@ -41,7 +41,7 @@ export function useWalletStats() {
       setMinWalletBalance(threshold);
 
       const [{ data: wallets, error: walletsError }, { data: subscriptions }] = await withTimeout(Promise.all([
-        supabase.from('wallets').select('*, users!inner(full_name, phone_number)'),
+        supabase.from('wallets').select('id, user_id, balance, reserved_balance, users!inner(full_name, phone_number)'),
         supabase.from('subscriptions').select('user_id').eq('status', 'active'),
       ]));
       if (walletsError) throw walletsError;
@@ -61,6 +61,7 @@ export function useWalletStats() {
           name: wallet.users?.full_name || 'Unknown',
           phone: wallet.users?.phone_number,
           balance,
+          reservedBalance: wallet.reserved_balance ?? 0,
           riskLevel,
           activeSubscriptions: activeSubsCount[wallet.user_id] || 0,
         };

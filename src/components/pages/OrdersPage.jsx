@@ -124,7 +124,7 @@ export function OrdersPage() {
                           Retry
                         </Button>
                       )}
-                      {(o.status === "pending" || o.status === "in_transit") && (
+                      {(o.status === "scheduled" || o.status === "pending" || o.status === "in_transit") && (
                         <Button 
                           size="sm" 
                           variant="primary"
@@ -149,7 +149,9 @@ export function OrdersPage() {
               { label: "Customer", val: selectedOrder.customerName },
               { label: "Date", val: selectedOrder.date },
               { label: "Product", val: `${selectedOrder.productName} (${selectedOrder.productUnit})` },
-              { label: "Quantity", val: `×${selectedOrder.quantity}` },
+              { label: "Quantity", val: selectedOrder.manuallyEdited
+                ? <span>×{selectedOrder.quantity} <span style={{ color: 'var(--yellow)', fontSize: 10 }}>✏ edited{selectedOrder.originalQuantity ? ` (was ×${selectedOrder.originalQuantity})` : ''}</span></span>
+                : `×${selectedOrder.quantity}` },
               { label: "Amount", val: `₹${selectedOrder.amount}` },
               { label: "Stop", val: selectedOrder.stopName },
             ].map(r => (
@@ -159,22 +161,63 @@ export function OrdersPage() {
               </div>
             ))}
           </div>
+
+          {/* Delivery address */}
+          {selectedOrder.addressLine && (
+            <div style={{ padding: "10px 12px", background: "var(--bg)", borderRadius: 7, marginBottom: 10 }}>
+              <div style={{ fontSize: 11, color: "var(--text-3)", marginBottom: 3 }}>Delivery Address</div>
+              <div style={{ fontSize: 13, color: "var(--text)" }}>{selectedOrder.addressLine}, {selectedOrder.city}</div>
+              {selectedOrder.deliveryInstructions && (
+                <div style={{ fontSize: 11.5, color: 'var(--yellow)', marginTop: 3 }}>📋 {selectedOrder.deliveryInstructions}</div>
+              )}
+            </div>
+          )}
+
           <div style={{ marginBottom: 12 }}>
             <div className="form-label">Status</div>
             <div style={{ marginTop: 4 }}><StatusBadge status={selectedOrder.status} /></div>
           </div>
+
           {selectedOrder.failReason && (
-            <div style={{ padding: "10px 12px", background: "var(--red-bg)", borderRadius: 7, marginBottom: 12 }}>
+            <div style={{ padding: "10px 12px", background: "var(--red-bg)", borderRadius: 7, marginBottom: 10 }}>
               <div style={{ fontSize: 11.5, color: "#991B1B" }}>
                 <strong>Failure Reason:</strong> {selectedOrder.failReason}
               </div>
             </div>
           )}
+
+          {selectedOrder.cancellationReason && (
+            <div style={{ padding: "10px 12px", background: "var(--red-bg)", borderRadius: 7, marginBottom: 10 }}>
+              <div style={{ fontSize: 11.5, color: "#991B1B" }}>
+                <strong>Cancelled:</strong> {selectedOrder.cancellationReason}
+              </div>
+            </div>
+          )}
+
           {selectedOrder.deliveredAt && (
-            <div style={{ padding: "10px 12px", background: "var(--green-bg)", borderRadius: 7 }}>
+            <div style={{ padding: "10px 12px", background: "var(--green-bg)", borderRadius: 7, marginBottom: 10 }}>
               <div style={{ fontSize: 11.5, color: "#15803D" }}>
                 ✓ Delivered at {new Date(selectedOrder.deliveredAt).toLocaleTimeString()}
+                {selectedOrder.bottlesCollected > 0 && ` · 🍶 ${selectedOrder.bottlesCollected} bottle${selectedOrder.bottlesCollected > 1 ? 's' : ''} collected`}
               </div>
+            </div>
+          )}
+
+          {selectedOrder.deliveryPhotoUrl && (
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 11, color: "var(--text-3)", marginBottom: 4 }}>Proof of Delivery</div>
+              <img
+                src={selectedOrder.deliveryPhotoUrl}
+                alt="Delivery proof"
+                style={{ width: "100%", maxHeight: 180, objectFit: "cover", borderRadius: 7, border: "1px solid var(--border)" }}
+              />
+            </div>
+          )}
+
+          {selectedOrder.deliveryNotes && (
+            <div style={{ padding: "10px 12px", background: "var(--bg)", borderRadius: 7 }}>
+              <div style={{ fontSize: 11, color: "var(--text-3)", marginBottom: 3 }}>Delivery Notes</div>
+              <div style={{ fontSize: 12, color: "var(--text-2)" }}>{selectedOrder.deliveryNotes}</div>
             </div>
           )}
         </Drawer>
