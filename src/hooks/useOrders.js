@@ -119,14 +119,22 @@ export function useOrders() {
   const updateOrderStatus = useCallback(
     async (id, newStatus, additionalData = {}) => {
       try {
-        const updateData = { status: newStatus, ...additionalData }
-        if (newStatus === "delivered")
-          updateData.delivered_at = new Date().toISOString()
-        const { error } = await supabase
-          .from("orders")
-          .update(updateData)
-          .eq("id", id)
-        if (error) throw error
+        if (newStatus === "delivered") {
+          // Use the same RPC as the rider app — atomically marks delivered + deducts wallet
+          const { data, error: rpcError } = await supabase.rpc("rpc_mark_order_delivered", {
+            p_order_id: id,
+            p_bottles_collected: additionalData.bottles_collected ?? 0,
+          })
+          if (rpcError) throw rpcError
+          if (!data?.success) throw new Error("RPC rpc_mark_order_delivered returned failure")
+        } else {
+          const updateData = { status: newStatus, ...additionalData }
+          const { error } = await supabase
+            .from("orders")
+            .update(updateData)
+            .eq("id", id)
+          if (error) throw error
+        }
         await fetchOrders()
         return { success: true }
       } catch (err) {
@@ -170,6 +178,33 @@ export function useOrders() {
     [fetchOrders],
   )
 
+  const retryOrder = useCallback(
+    async (id, newFailReason) => {
+      try {
+        // Get tomorrow's date
+        const tomorrow = new Date()
+        tomorrow.setDate(tomorrow.getDate() + 1)
+        const tomorrowStr = tomorrow.toISOString().split("T")[0]
+
+        const updateData = {
+          status: "scheduled",
+          delivery_date: tomorrowStr,
+          failure_reason: newFailReason || null,
+        }
+        const { error } = await supabase
+          .from("orders")
+          .update(updateData)
+          .eq("id", id)
+        if (error) throw error
+        await fetchOrders()
+        return { success: true }
+      } catch (err) {
+        return { success: false, error: err.message }
+      }
+    },
+    [fetchOrders],
+  )
+
   const updateFilters = useCallback((newFilters) => {
     setFilters((prev) => ({ ...prev, ...newFilters }))
     setPage(1)
@@ -193,6 +228,7 @@ export function useOrders() {
     updateOrderStatus,
     updateOrderNotes,
     reassignDriver,
+    retryOrder,
     refresh: fetchOrders,
   }
 }

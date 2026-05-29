@@ -144,7 +144,7 @@ export function DriversPage() {
                 📱 {d.phone} · 🚗 {d.vehicle}
               </div>
               <div style={{ fontSize: 11.5, color: 'var(--text-3)', marginBottom: 6 }}>
-                🏭 {d.hubName} · {d.isVerified ? '✅ Verified' : '⚠ Unverified'}
+                🏭 {d.hubName} · {d.isVerified ? '✅ Verified' : '⚠ Unverified'} · ⭐ {d.rating}
               </div>
               <div style={{ display: 'flex', gap: 16, fontSize: 12 }}>
                 <div style={{ textAlign: 'center' }}>
@@ -168,15 +168,16 @@ export function DriversPage() {
       {selectedDriver && (
         <Drawer title={`Driver — ${selectedDriver.name}`} onClose={() => setSelectedDriver(null)}>
           {/* Stats row */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 16 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 8, marginBottom: 16 }}>
             {[
-              { label: 'Total Deliveries', val: selectedDriver.totalDeliveries },
+              { label: 'Rating', val: `⭐ ${selectedDriver.rating}`, color: 'var(--yellow)' },
+              { label: 'Total', val: selectedDriver.totalDeliveries },
               { label: 'Completed', val: selectedDriver.completedDeliveries, color: 'var(--green)' },
               { label: 'Failed', val: selectedDriver.failedDeliveries, color: selectedDriver.failedDeliveries > 0 ? 'var(--red)' : 'var(--text)' },
             ].map(s => (
               <div key={s.label} style={{ background: 'var(--bg)', borderRadius: 8, padding: '10px 12px', textAlign: 'center' }}>
                 <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 4 }}>{s.label}</div>
-                <div style={{ fontSize: 18, fontWeight: 600, fontFamily: "'DM Mono',monospace", color: s.color || 'var(--text)' }}>{s.val}</div>
+                <div style={{ fontSize: 16, fontWeight: 600, fontFamily: "'DM Mono',monospace", color: s.color || 'var(--text)' }}>{s.val}</div>
               </div>
             ))}
           </div>

@@ -77,6 +77,48 @@ export function AssetTrackingPage() {
         </div>
       )}
 
+      {rawReturns?.some(r => r.status === 'requested') && (
+        <div className="card" style={{ padding: 0, marginBottom: 20 }}>
+          <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', fontWeight: 600 }}>
+            Pending Return Requests
+          </div>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Customer</th>
+                  <th>Quantity</th>
+                  <th>Date</th>
+                  <th>Route / Stop</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rawReturns.filter(r => r.status === 'requested').map(r => (
+                  <tr key={r.id}>
+                    <td style={{ fontWeight: 500 }}>
+                      {r.users?.full_name}
+                      <div style={{ fontSize: 11, color: "var(--text-3)" }}>{r.users?.phone_number}</div>
+                    </td>
+                    <td><span style={{ fontWeight: 600 }}>🍶 {r.quantity}</span></td>
+                    <td>{new Date(r.return_date).toLocaleDateString()}</td>
+                    <td>
+                      {r.routes?.name ? (
+                        <>
+                          <div style={{ fontWeight: 500 }}>{r.routes?.name}</div>
+                          <div style={{ fontSize: 11, color: "var(--text-3)" }}>{r.route_stops?.name}</div>
+                        </>
+                      ) : (
+                        <span style={{ color: "var(--orange)", fontSize: 12 }}>Unassigned</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       <div className="card" style={{ padding: 0 }}>
         <div className="table-wrap">
           <table>

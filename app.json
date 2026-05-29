@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "extra": {
+      "eas": {
+        "projectId": "6cce699b-9dfe-44a6-8da8-14b9991acc12"
+      }
+    },
+    "android": {
+      "package": "com.swymbnsl.milkdash"
+    }
+  }
+}

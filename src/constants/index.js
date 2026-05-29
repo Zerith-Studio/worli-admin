@@ -25,6 +25,7 @@ export const NAV_ITEMS = [
   { key: "wallet", icon: "💳", label: "Wallet", group: "payments" },
   { key: "autopay", icon: "🔄", label: "Autopay Queue", group: "payments" },
   { key: "assets", icon: "🍶", label: "Asset Tracking", group: "assets" },
+  { key: "bottle-returns", icon: "♻️", label: "Bottle Returns", group: "assets" },
   { key: "settings", icon: "⚙", label: "Settings", group: "system" },
 ]
 export const GROUP_LABELS = {
@@ -59,6 +60,7 @@ export const PAGE_TITLES = {
   wallet: "Wallet",
   autopay: "Autopay Queue",
   assets: "Asset Tracking",
+  "bottle-returns": "Bottle Returns",
   settings: "Settings",
 }
 

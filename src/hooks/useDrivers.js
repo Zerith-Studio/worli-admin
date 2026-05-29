@@ -40,7 +40,7 @@ export function useDrivers() {
       // Fetch riders (no hub_id any more)
       const { data: ridersData, error: ridersError } = await supabase
         .from('riders')
-        .select('id, vehicle_info, status, is_verified, total_deliveries');
+        .select('id, vehicle_info, status, is_verified, total_deliveries, rating');
       if (ridersError) throw ridersError;
 
       const riderIds = ridersData?.map(r => r.id) || [];
@@ -97,6 +97,7 @@ export function useDrivers() {
         status: rider.status || 'active',
         isVerified: rider.is_verified || false,
         totalDeliveries: rider.total_deliveries || 0,
+        rating: rider.rating ? Number(rider.rating).toFixed(1) : '5.0',
         completedDeliveries: statsMap[rider.id]?.completed || 0,
         failedDeliveries: statsMap[rider.id]?.failed || 0,
         assignedRoutes: assignmentMap[rider.id] || [],

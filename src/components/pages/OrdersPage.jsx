@@ -1,6 +1,9 @@
 // ============================================
 // FILE: components/pages/OrdersPage.jsx
-// Orders Page Component
+// - Mark Delivered now calls rpc_mark_order_delivered via hook (wallet deduction)
+// - Added customer name / order number search filter
+// - Retry Tomorrow actually reschedules order to next day
+// - Confirmation dialog before marking delivered
 // ============================================
 
 import React, { useState } from 'react';
@@ -12,6 +15,7 @@ import { StatusBadge } from '../ui/StatusBadge';
 import { Drawer } from '../ui/Drawer';
 import { Modal } from '../ui/Modal';
 import { LoadingSpinner } from '../ui/LoadingSpinner';
+import { SearchInput } from '../ui/SearchInput';
 import { ORDER_STATUSES, FAIL_REASONS } from '../../constants';
 
 const STATUSES = [
@@ -29,18 +33,64 @@ export function OrdersPage() {
     updateOrderStatus,
     updateOrderNotes,
     reassignDriver,
+    retryOrder,
     refresh,
   } = useOrders();
 
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [failModal, setFailModal] = useState(null);
-  const [notesModal, setNotesModal] = useState(null);
-  const [noteForm, setNoteForm] = useState({ delivery_notes: '' });
+  const [failReasonEdit, setFailReasonEdit] = useState('');
+  const [retrying, setRetrying] = useState(false);
+  const [retryMsg, setRetryMsg] = useState(null);
+  const [deliverModal, setDeliverModal] = useState(null);  // confirmation
+  const [delivering, setDelivering] = useState(false);
+  const [deliverMsg, setDeliverMsg] = useState(null);
+  const [search, setSearch] = useState('');
 
   useDataRefresh(refresh, 60000, true);
 
-  const handleMarkDelivered = async (orderId) => {
-    await updateOrderStatus(orderId, 'delivered');
+  // Client-side search filter (name or order number)
+  const displayedOrders = search.trim()
+    ? orders.filter(o =>
+        o.customerName.toLowerCase().includes(search.toLowerCase()) ||
+        o.orderNumber?.toLowerCase().includes(search.toLowerCase())
+      )
+    : orders;
+
+  const handleMarkDelivered = (o) => {
+    setDeliverModal(o);
+    setDeliverMsg(null);
+  };
+
+  const confirmMarkDelivered = async () => {
+    if (!deliverModal) return;
+    setDelivering(true);
+    const result = await updateOrderStatus(deliverModal.id, 'delivered');
+    setDelivering(false);
+    if (result.success) {
+      setDeliverModal(null);
+    } else {
+      setDeliverMsg({ ok: false, text: result.error });
+    }
+  };
+
+  const openFailModal = (o) => {
+    setFailModal(o);
+    setFailReasonEdit(o.failReason || FAIL_REASONS[0]);
+    setRetryMsg(null);
+  };
+
+  const handleRetryTomorrow = async () => {
+    if (!failModal) return;
+    setRetrying(true);
+    const result = await retryOrder(failModal.id, failReasonEdit);
+    setRetrying(false);
+    if (result.success) {
+      setRetryMsg({ ok: true, text: 'Rescheduled to tomorrow ✓' });
+      setTimeout(() => setFailModal(null), 1200);
+    } else {
+      setRetryMsg({ ok: false, text: result.error });
+    }
   };
 
   if (loading && orders.length === 0) {
@@ -63,10 +113,15 @@ export function OrdersPage() {
     <div>
       <div className="page-header">
         <div className="page-title">Orders</div>
-        <div className="page-sub">{orders.length} orders</div>
+        <div className="page-sub">{orders.length} orders today</div>
       </div>
 
       <div className="search-filter">
+        <SearchInput
+          placeholder="Search customer or order #..."
+          value={search}
+          onChange={setSearch}
+        />
         <input 
           type="date" 
           className="form-input" 
@@ -98,7 +153,13 @@ export function OrdersPage() {
               </tr>
             </thead>
             <tbody>
-              {orders.map(o => (
+              {displayedOrders.length === 0 ? (
+                <tr>
+                  <td colSpan={9} style={{ textAlign: 'center', padding: 24, color: 'var(--text-4)' }}>
+                    No orders found
+                  </td>
+                </tr>
+              ) : displayedOrders.map(o => (
                 <tr key={o.id}>
                   <td style={{ fontFamily: "'DM Mono',monospace", fontSize: 11.5, color: "var(--text-3)" }}>
                     {o.orderNumber}
@@ -107,7 +168,11 @@ export function OrdersPage() {
                   <td style={{ fontSize: 11.5, color: "var(--text-3)" }}>{o.stopName}</td>
                   <td>{o.productName} <span style={{ color: "var(--text-4)", fontSize: 11 }}>{o.productUnit}</span></td>
                   <td>×{o.quantity}</td>
-                  <td style={{ fontFamily: "'DM Mono',monospace" }}>₹{o.amount}</td>
+                  <td style={{ fontFamily: "'DM Mono',monospace" }}>
+                    {o.amount === 0
+                      ? <span style={{ color: 'var(--green)', fontSize: 12 }}>₹0 Free</span>
+                      : `₹${o.amount}`}
+                  </td>
                   <td><StatusBadge status={o.status} /></td>
                   <td style={{ fontSize: 11.5, color: "var(--red)", maxWidth: 140 }}>
                     {o.failReason || <span style={{ color: "var(--text-4)" }}>—</span>}
@@ -119,7 +184,7 @@ export function OrdersPage() {
                         <Button 
                           size="sm" 
                           style={{ color: "var(--red)", borderColor: "var(--red)" }}
-                          onClick={() => setFailModal(o)}
+                          onClick={() => openFailModal(o)}
                         >
                           Retry
                         </Button>
@@ -128,7 +193,7 @@ export function OrdersPage() {
                         <Button 
                           size="sm" 
                           variant="primary"
-                          onClick={() => handleMarkDelivered(o.id)}
+                          onClick={() => handleMarkDelivered(o)}
                         >
                           Mark Delivered
                         </Button>
@@ -142,6 +207,7 @@ export function OrdersPage() {
         </div>
       </div>
 
+      {/* ORDER DETAIL DRAWER */}
       {selectedOrder && (
         <Drawer title={`Order ${selectedOrder.orderNumber}`} onClose={() => setSelectedOrder(null)}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
@@ -152,7 +218,7 @@ export function OrdersPage() {
               { label: "Quantity", val: selectedOrder.manuallyEdited
                 ? <span>×{selectedOrder.quantity} <span style={{ color: 'var(--yellow)', fontSize: 10 }}>✏ edited{selectedOrder.originalQuantity ? ` (was ×${selectedOrder.originalQuantity})` : ''}</span></span>
                 : `×${selectedOrder.quantity}` },
-              { label: "Amount", val: `₹${selectedOrder.amount}` },
+              { label: "Amount", val: selectedOrder.amount === 0 ? '₹0 (Free)' : `₹${selectedOrder.amount}` },
               { label: "Stop", val: selectedOrder.stopName },
             ].map(r => (
               <div key={r.label} style={{ background: "var(--bg)", padding: "10px 12px", borderRadius: 7 }}>
@@ -223,15 +289,52 @@ export function OrdersPage() {
         </Drawer>
       )}
 
-{failModal && (
+      {/* CONFIRM MARK DELIVERED MODAL */}
+      {deliverModal && (
+        <Modal
+          title="Confirm Mark as Delivered"
+          onClose={() => setDeliverModal(null)}
+          footer={
+            <>
+              <Button onClick={() => setDeliverModal(null)}>Cancel</Button>
+              <Button variant="primary" onClick={confirmMarkDelivered} disabled={delivering}>
+                {delivering ? 'Processing...' : 'Confirm Delivered'}
+              </Button>
+            </>
+          }
+        >
+          <div style={{ padding: '12px 14px', background: 'rgba(34,197,94,0.08)', borderRadius: 8, marginBottom: 14, borderLeft: '4px solid var(--green)' }}>
+            <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--green)', marginBottom: 4 }}>
+              This will trigger wallet deduction
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--text-3)' }}>
+              Marking <strong>{deliverModal.customerName}</strong>'s order as delivered will run the same process as a rider delivery — including automatic wallet balance deduction.
+            </div>
+          </div>
+          <div style={{ fontSize: 13 }}>
+            <strong>Order:</strong> {deliverModal.orderNumber}<br />
+            <strong>Product:</strong> {deliverModal.productName} ×{deliverModal.quantity}<br />
+            <strong>Amount:</strong> {deliverModal.amount === 0 ? '₹0 (Free)' : `₹${deliverModal.amount}`}
+          </div>
+          {deliverMsg && (
+            <div style={{ marginTop: 12, padding: '8px 12px', borderRadius: 6, background: 'var(--red-bg)', color: 'var(--red)', fontSize: 13 }}>
+              {deliverMsg.text}
+            </div>
+          )}
+        </Modal>
+      )}
+
+      {/* FAIL MODAL — Retry Tomorrow */}
+      {failModal && (
         <Modal
           title="Delivery Failure — Action Required"
           onClose={() => setFailModal(null)}
           footer={
             <>
               <Button onClick={() => setFailModal(null)}>Cancel</Button>
-              <Button variant="primary" onClick={() => setFailModal(null)}>Retry Tomorrow</Button>
-              <Button variant="danger" onClick={() => setFailModal(null)}>Issue Refund</Button>
+              <Button variant="primary" onClick={handleRetryTomorrow} disabled={retrying}>
+                {retrying ? 'Rescheduling...' : 'Retry Tomorrow'}
+              </Button>
             </>
           }
         >
@@ -241,59 +344,26 @@ export function OrdersPage() {
           </div>
           <div className="form-group">
             <label className="form-label">Failure Reason (confirm/update)</label>
-            <select className="form-select" defaultValue={failModal.failReason}>
+            <select
+              className="form-select"
+              value={failReasonEdit}
+              onChange={e => setFailReasonEdit(e.target.value)}
+            >
               {FAIL_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
             </select>
           </div>
-          <div className="form-group">
-            <label className="form-label">Action</label>
-            <select className="form-select">
-              <option>Retry tomorrow at same time</option>
-              <option>Retry at specific time</option>
-              <option>Issue wallet refund</option>
-              <option>Cancel and refund</option>
-            </select>
+          <div style={{ padding: '10px 12px', background: 'var(--bg)', borderRadius: 7, fontSize: 12, color: 'var(--text-3)', marginTop: 4 }}>
+            ℹ️ "Retry Tomorrow" will reschedule this order to tomorrow and reset status to <strong>Scheduled</strong>.
           </div>
-          <div className="form-group">
-            <label className="form-label">Driver Notes</label>
-            <textarea
-              className="form-input"
-              style={{ height: 70, paddingTop: 8 }}
-              placeholder="Add notes for retry driver..."
-            />
-          </div>
-        </Modal>
-      )}
-
-      {notesModal && (
-        <Modal
-          title={`Add Notes - ${notesModal.customerName}`}
-          onClose={() => setNotesModal(null)}
-          footer={
-            <>
-              <Button onClick={() => setNotesModal(null)}>Cancel</Button>
-              <Button variant="primary" onClick={() => {
-                updateOrderNotes(notesModal.id, noteForm.delivery_notes);
-                setNotesModal(null);
-                setNoteForm({ delivery_notes: '' });
-              }}>Save Notes</Button>
-            </>
-          }
-        >
-          <div className="form-group">
-            <label className="form-label">Order</label>
-            <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--text)' }}>{notesModal.orderNumber}</div>
-          </div>
-          <div className="form-group">
-            <label className="form-label">Delivery Notes</label>
-            <textarea
-              className="form-input"
-              style={{ height: 100, paddingTop: 8 }}
-              placeholder="Add delivery instructions or notes..."
-              value={noteForm.delivery_notes}
-              onChange={(e) => setNoteForm(prev => ({ ...prev, delivery_notes: e.target.value }))}
-            />
-          </div>
+          {retryMsg && (
+            <div style={{
+              marginTop: 12, padding: '8px 12px', borderRadius: 6, fontSize: 13,
+              background: retryMsg.ok ? 'rgba(34,197,94,0.1)' : 'var(--red-bg)',
+              color: retryMsg.ok ? 'var(--green)' : 'var(--red)',
+            }}>
+              {retryMsg.text}
+            </div>
+          )}
         </Modal>
       )}
     </div>

@@ -36,6 +36,7 @@ import {
   FreeSamplePage,
   ProductsPage,
   AddressesPage,
+  BottleReturnsPage,
 } from "./components/pages"
 import { Button } from "./components/ui/Button"
 import { NAV_ITEMS, GROUP_LABELS } from "./constants"
@@ -130,6 +131,7 @@ function MainLayout({ groupedNav, logout }) {
             <Route path="/wallet" element={<WalletPage />} />
             <Route path="/autopay" element={<AutopayQueuePage />} />
             <Route path="/assets" element={<AssetTrackingPage />} />
+            <Route path="/bottle-returns" element={<BottleReturnsPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

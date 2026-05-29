@@ -12,6 +12,7 @@ export function useAssets() {
   const [assets, setAssets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [rawReturns, setRawReturns] = useState([]);
   const [stats, setStats] = useState({
     totalIssued: 0,
     totalReturned: 0,
@@ -27,9 +28,17 @@ export function useAssets() {
       // Fetch bottle returns
       const { data: returns, error: returnsError } = await supabase
         .from('bottle_returns')
-        .select('user_id, quantity, status');
+        .select(`
+          id, user_id, quantity, status, return_date, notes,
+          addresses (address_line1, city, route_stop_id),
+          routes (name),
+          route_stops (name),
+          users:user_id (full_name, phone_number)
+        `);
 
       if (returnsError) throw returnsError;
+
+      setRawReturns(returns || []);
 
       // Fetch users with bottles_pending
       const { data: users, error: usersError } = await supabase
@@ -115,11 +124,27 @@ export function useAssets() {
     fetchAssets();
   }, [fetchAssets]);
 
+  const assignBottleReturn = async (returnId, updates) => {
+    try {
+      const { error } = await supabase
+        .from('bottle_returns')
+        .update(updates)
+        .eq('id', returnId);
+      if (error) throw error;
+      fetchAssets();
+      return { success: true };
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  };
+
   return {
     assets,
+    rawReturns,
     stats,
     loading,
     error,
     refresh: fetchAssets,
+    assignBottleReturn,
   };
 }
