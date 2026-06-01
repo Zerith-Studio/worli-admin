@@ -107,7 +107,7 @@ function MainLayout({ groupedNav, logout }) {
         </div>
       </div>
 
-      <div className="main">
+      <div className="main-area">
         <div className="content">
           <Routes>
             <Route path="/" element={<DashboardPage />} />

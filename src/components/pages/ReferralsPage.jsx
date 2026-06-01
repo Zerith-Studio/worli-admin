@@ -16,7 +16,7 @@ export function ReferralsPage() {
     try {
       const { data, error } = await supabase
         .from("referrals")
-        .select("*, referral_code, referrer:users!referrer_id(full_name, phone_number), referee:users!referee_id(full_name, phone_number)")
+        .select("*, referrer:users!referrer_id(full_name, phone_number), referee:users!referee_id(full_name, phone_number)")
         .order("created_at", { ascending: false })
       if (error) throw error
       setReferrals(data || [])

@@ -191,7 +191,7 @@ export function NotificationsPage() {
     setLoading(true)
     const { data } = await supabase
       .from("push_notifications")
-      .select("*, admins(email)")
+      .select("*")
       .order("created_at", { ascending: false })
       .limit(50)
     setNotifications(data || [])

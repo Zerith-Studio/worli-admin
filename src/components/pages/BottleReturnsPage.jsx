@@ -66,7 +66,7 @@ export function BottleReturnsPage() {
           photo_url,
           created_at,
           users:user_id ( full_name, phone_number ),
-          riders:rider_id ( users:id ( full_name ) ),
+          riders:rider_id ( users ( full_name ) ),
           addresses:address_id ( address_line1, city ),
           routes:route_id ( name ),
           route_stops:route_stop_id ( name )

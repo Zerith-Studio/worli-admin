@@ -11,7 +11,7 @@ import { StatusBadge } from '../ui/StatusBadge';
 import { LoadingSpinner } from '../ui/LoadingSpinner';
 
 export function AssetTrackingPage() {
-  const { assets, stats, loading, error, refresh } = useAssets();
+  const { assets, rawReturns, stats, loading, error, refresh } = useAssets();
 
   useDataRefresh(refresh, 60000, true);
 
