@@ -46,6 +46,7 @@ export function OrdersPage() {
   const [delivering, setDelivering] = useState(false);
   const [deliverMsg, setDeliverMsg] = useState(null);
   const [search, setSearch] = useState('');
+  const [photoModal, setPhotoModal] = useState(null); // url string or null
 
   useDataRefresh(refresh, 60000, true);
 
@@ -260,23 +261,63 @@ export function OrdersPage() {
             </div>
           )}
 
-          {selectedOrder.deliveredAt && (
-            <div style={{ padding: "10px 12px", background: "var(--green-bg)", borderRadius: 7, marginBottom: 10 }}>
-              <div style={{ fontSize: 11.5, color: "#15803D" }}>
-                ✓ Delivered at {new Date(selectedOrder.deliveredAt).toLocaleTimeString()}
-                {selectedOrder.bottlesCollected > 0 && ` · 🍶 ${selectedOrder.bottlesCollected} bottle${selectedOrder.bottlesCollected > 1 ? 's' : ''} collected`}
+          {/* Delivery proof + bottle photos */}
+          {selectedOrder.status === 'delivered' && (
+            <div style={{ marginBottom: 12 }}>
+              {/* Delivered timestamp */}
+              {selectedOrder.deliveredAt && (
+                <div style={{ padding: '8px 12px', background: 'var(--green-bg)', borderRadius: 7, marginBottom: 10 }}>
+                  <div style={{ fontSize: 11.5, color: '#15803D' }}>
+                    ✓ Delivered at {new Date(selectedOrder.deliveredAt).toLocaleTimeString()}
+                    {selectedOrder.bottlesCollected > 0 && ` · 🍶 ${selectedOrder.bottlesCollected} bottle${selectedOrder.bottlesCollected > 1 ? 's' : ''} collected`}
+                  </div>
+                </div>
+              )}
+              <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 8, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                Delivery Evidence
               </div>
-            </div>
-          )}
 
-          {selectedOrder.deliveryPhotoUrl && (
-            <div style={{ marginBottom: 10 }}>
-              <div style={{ fontSize: 11, color: "var(--text-3)", marginBottom: 4 }}>Proof of Delivery</div>
-              <img
-                src={selectedOrder.deliveryPhotoUrl}
-                alt="Delivery proof"
-                style={{ width: "100%", maxHeight: 180, objectFit: "cover", borderRadius: 7, border: "1px solid var(--border)" }}
-              />
+              {selectedOrder.deliveryPhotoUrl ? (
+                <div style={{ marginBottom: 8 }}>
+                  <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 4 }}>📸 Proof of Delivery</div>
+                  <div
+                    onClick={() => setPhotoModal(selectedOrder.deliveryPhotoUrl)}
+                    style={{ cursor: 'zoom-in', position: 'relative', borderRadius: 8, overflow: 'hidden', border: '1px solid var(--border)' }}
+                  >
+                    <img
+                      src={selectedOrder.deliveryPhotoUrl}
+                      alt="Delivery proof"
+                      style={{ width: '100%', maxHeight: 240, objectFit: 'cover', display: 'block' }}
+                    />
+                    <div style={{ position: 'absolute', bottom: 6, right: 6, background: 'rgba(0,0,0,0.55)', borderRadius: 4, padding: '2px 7px', fontSize: 10.5, color: '#fff' }}>
+                      Click to expand
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ padding: '10px 12px', background: 'var(--bg)', borderRadius: 7, marginBottom: 8, fontSize: 12, color: 'var(--text-3)' }}>
+                  ⚠️ No delivery photo captured
+                </div>
+              )}
+
+              {selectedOrder.bottlePhotoUrl && (
+                <div>
+                  <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 4 }}>🍶 Bottle Collection Photo</div>
+                  <div
+                    onClick={() => setPhotoModal(selectedOrder.bottlePhotoUrl)}
+                    style={{ cursor: 'zoom-in', position: 'relative', borderRadius: 8, overflow: 'hidden', border: '1px solid var(--border)' }}
+                  >
+                    <img
+                      src={selectedOrder.bottlePhotoUrl}
+                      alt="Bottle collection"
+                      style={{ width: '100%', maxHeight: 160, objectFit: 'cover', display: 'block' }}
+                    />
+                    <div style={{ position: 'absolute', bottom: 6, right: 6, background: 'rgba(0,0,0,0.55)', borderRadius: 4, padding: '2px 7px', fontSize: 10.5, color: '#fff' }}>
+                      Click to expand
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -287,6 +328,36 @@ export function OrdersPage() {
             </div>
           )}
         </Drawer>
+      )}
+
+      {/* PHOTO LIGHTBOX MODAL */}
+      {photoModal && (
+        <div
+          onClick={() => setPhotoModal(null)}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 9999,
+            background: 'rgba(0,0,0,0.85)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            cursor: 'zoom-out', padding: 24,
+          }}
+        >
+          <img
+            src={photoModal}
+            alt="Full size"
+            style={{ maxWidth: '100%', maxHeight: '90vh', borderRadius: 10, objectFit: 'contain', boxShadow: '0 8px 40px rgba(0,0,0,0.5)' }}
+            onClick={e => e.stopPropagation()}
+          />
+          <button
+            onClick={() => setPhotoModal(null)}
+            style={{
+              position: 'absolute', top: 16, right: 20,
+              background: 'rgba(255,255,255,0.15)', border: 'none',
+              color: '#fff', fontSize: 22, cursor: 'pointer',
+              width: 36, height: 36, borderRadius: '50%',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}
+          >✕</button>
+        </div>
       )}
 
       {/* CONFIRM MARK DELIVERED MODAL */}

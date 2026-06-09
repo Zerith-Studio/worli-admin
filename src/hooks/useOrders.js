@@ -91,7 +91,8 @@ export function useOrders() {
           stopName: order.route_stops?.name || "—",
           deliveredAt: order.delivered_at,
           deliveryNotes: order.delivery_notes,
-          deliveryPhotoUrl: order.delivery_photo_url,
+          deliveryPhotoUrl: order.delivery_photo_url || null,
+          bottlePhotoUrl: order.bottle_photo_url || null,
           bottlesCollected: order.bottles_collected || 0,
           discountAmount: order.discount_amount || 0,
         })) || []

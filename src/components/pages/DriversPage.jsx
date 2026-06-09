@@ -12,6 +12,7 @@ import { StatusBadge } from '../ui/StatusBadge';
 import { Drawer } from '../ui/Drawer';
 import { LoadingSpinner } from '../ui/LoadingSpinner';
 import { RIDER_STATUSES } from '../../constants';
+import { supabase } from '../../lib/supabase';
 
 export function DriversPage() {
   const {
@@ -29,6 +30,26 @@ export function DriversPage() {
   // Cascaded hub→route selectors for route assignment
   const [assignHubId, setAssignHubId] = useState('');
   const [assignRouteId, setAssignRouteId] = useState('');
+
+  // Batch rider-order assignment
+  const [assigning, setAssigning] = useState(false);
+  const [assignMsg, setAssignMsg] = useState(null);
+
+  const handleAssignRidersToOrders = async () => {
+    setAssigning(true);
+    setAssignMsg(null);
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      const { data, error } = await supabase.rpc('assign_riders_to_orders', { p_date: today });
+      if (error) throw error;
+      setAssignMsg({ ok: true, text: `✓ ${data?.updated ?? 0} order${data?.updated !== 1 ? 's' : ''} assigned` });
+      await refresh();
+    } catch (err) {
+      setAssignMsg({ ok: false, text: `Error: ${err.message}` });
+    } finally {
+      setAssigning(false);
+    }
+  };
 
   useDataRefresh(refresh, 60000, true);
 
@@ -113,10 +134,28 @@ export function DriversPage() {
 
   return (
     <div>
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between' }}>
+      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div>
           <div className="page-title">Drivers</div>
           <div className="page-sub">{drivers.length} drivers on team</div>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
+          <Button
+            variant="primary"
+            onClick={handleAssignRidersToOrders}
+            disabled={assigning}
+          >
+            {assigning ? 'Assigning...' : '🗺 Assign Riders to Today\'s Orders'}
+          </Button>
+          {assignMsg && (
+            <span style={{
+              fontSize: 12,
+              color: assignMsg.ok ? 'var(--green)' : 'var(--red)',
+              fontWeight: 500,
+            }}>
+              {assignMsg.text}
+            </span>
+          )}
         </div>
       </div>
 
