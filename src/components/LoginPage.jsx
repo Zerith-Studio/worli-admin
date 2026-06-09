@@ -56,7 +56,7 @@ export function LoginPage() {
         <div className="login-logo">
           <div className="login-logo-icon">M</div>
           <div>
-            <div className="logo-text" style={{ fontSize: '18px', color: '#111827' }}>MilkRide</div>
+            <div className="logo-text" style={{ fontSize: '18px', color: '#111827' }}>Worli Admin</div>
             <div className="logo-sub" style={{ fontSize: '11px' }}>Admin Console</div>
           </div>
         </div>

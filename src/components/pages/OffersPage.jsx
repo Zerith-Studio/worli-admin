@@ -285,7 +285,7 @@ export function OffersPage() {
             <div className="form-group">
               <label className="form-label">Link URL <span style={{ fontWeight: 400, color: "var(--text-3)" }}>(optional deep link)</span></label>
               <input name="link_url" className="form-input" value={form.link_url} onChange={handleChange}
-                placeholder="milkride://product/..." />
+                placeholder="worli://product/..." />
             </div>
 
             <div className="form-group">

@@ -58,7 +58,7 @@ function MainLayout({ groupedNav, logout }) {
         <div className="sidebar-logo">
           <div className="logo-icon">M</div>
           <div>
-            <div className="logo-text">MilkRide</div>
+            <div className="logo-text">Worli Admin</div>
             <div className="logo-sub">Ops Console</div>
           </div>
         </div>
