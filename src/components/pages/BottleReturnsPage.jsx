@@ -14,7 +14,9 @@ import { Drawer } from '../ui/Drawer';
 import { LoadingSpinner } from '../ui/LoadingSpinner';
 import { Select } from '../ui/Select';
 import { useDataRefresh } from '../../hooks/useDataRefresh';
+import { useDrivers } from '../../hooks/useDrivers';
 import { UserNameLink } from '../ui/UserNameLink';
+import { Modal } from '../ui/Modal';
 
 const STATUS_FILTERS = [
   { value: 'all', label: 'All Statuses' },
@@ -44,6 +46,12 @@ export function BottleReturnsPage() {
   const [markingId, setMarkingId] = useState(null);
   const [markMsg, setMarkMsg] = useState(null);
   const [photoModal, setPhotoModal] = useState(null);
+  
+  const { drivers } = useDrivers();
+  const [reassignModal, setReassignModal] = useState(null);
+  const [selectedDriver, setSelectedDriver] = useState('');
+  const [autoAssigning, setAutoAssigning] = useState(false);
+
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -119,6 +127,39 @@ export function BottleReturnsPage() {
     }
   };
 
+  const handleAutoAssign = async () => {
+    if (!window.confirm("Run auto-assignment for today? This will assign pending bottle returns based on today's route assignments.")) return;
+    setAutoAssigning(true);
+    try {
+      const { data, error } = await supabase.rpc('assign_riders_to_bottle_returns');
+      if (error) throw error;
+      alert(`Auto-assignment complete. Updated ${data?.updated || 0} bottle returns.`);
+      fetchReturns(true);
+    } catch (err) {
+      alert(`Failed to run auto-assignment: ${err.message}`);
+    } finally {
+      setAutoAssigning(false);
+    }
+  };
+
+  const handleReassign = async () => {
+    if (!selectedDriver) return;
+    try {
+      const { error } = await supabase
+        .from('bottle_returns')
+        .update({ rider_id: selectedDriver })
+        .eq('id', reassignModal.id);
+      if (error) throw error;
+      setReassignModal(null);
+      setSelectedDriver('');
+      fetchReturns(true);
+      // Update selected return if open
+      setSelectedReturn(prev => prev?.id === reassignModal.id ? { ...prev, rider_id: selectedDriver, riders: { users: { full_name: drivers.find(d => d.id === selectedDriver)?.full_name } } } : prev);
+    } catch (err) {
+      alert(`Reassign failed: ${err.message}`);
+    }
+  };
+
   const statusColor = (status) => {
     switch (status) {
       case 'pending': return 'var(--yellow)';
@@ -146,6 +187,11 @@ export function BottleReturnsPage() {
         <div>
           <div className="page-title">Bottle Returns</div>
           <div className="page-sub">{returns.length} records · {pendingCount} pending · {totalBottles} total bottles</div>
+        </div>
+        <div>
+          <Button variant="outline" onClick={handleAutoAssign} disabled={autoAssigning}>
+            {autoAssigning ? 'Running...' : 'Run Auto-Assignment'}
+          </Button>
         </div>
       </div>
 
@@ -328,6 +374,15 @@ export function BottleReturnsPage() {
                 <div style={{ fontSize: 13, fontWeight: 500 }}>{row.val}</div>
               </div>
             ))}
+            <div style={{ background: 'var(--bg)', padding: '10px 12px', borderRadius: 7, gridColumn: 'span 2', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 3 }}>Assigned Rider</div>
+                <div style={{ fontSize: 13, fontWeight: 500 }}>{selectedReturn.riders?.users?.full_name || 'Unassigned'}</div>
+              </div>
+              <Button size="sm" onClick={() => { setReassignModal(selectedReturn); setSelectedDriver(selectedReturn.rider_id || ''); }}>
+                Change
+              </Button>
+            </div>
           </div>
 
           <div style={{ marginBottom: 12 }}>
@@ -424,6 +479,27 @@ export function BottleReturnsPage() {
             }}
           >✕</button>
         </div>
+      )}
+
+      {/* REASSIGN MODAL */}
+      {reassignModal && (
+        <Modal title="Change Assigned Driver" onClose={() => setReassignModal(null)}>
+          <div className="form-group">
+            <label className="form-label">Select Driver</label>
+            <Select
+              value={selectedDriver}
+              onChange={setSelectedDriver}
+              options={[
+                { value: '', label: '-- Select Driver --' },
+                ...drivers.map(d => ({ value: d.id, label: d.full_name }))
+              ]}
+            />
+          </div>
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 24 }}>
+            <Button variant="outline" onClick={() => setReassignModal(null)}>Cancel</Button>
+            <Button variant="primary" onClick={handleReassign} disabled={!selectedDriver}>Reassign</Button>
+          </div>
+        </Modal>
       )}
     </div>
   );
