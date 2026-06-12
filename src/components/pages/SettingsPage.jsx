@@ -126,8 +126,12 @@ export function SettingsPage() {
             <input type="number" className="form-input" value={localSettings.min_bottles_recharge || '1'} onChange={e => updateLocal('min_bottles_recharge', e.target.value)} />
           </div>
           <div className="form-group">
-            <label className="form-label">Referral Reward Amount (₹)</label>
-            <input type="number" className="form-input" value={localSettings.referral_reward_amount || '50'} onChange={e => updateLocal('referral_reward_amount', e.target.value)} />
+            <label className="form-label">Referrer Reward Amount (₹)</label>
+            <input type="number" className="form-input" value={localSettings.referral_reward_amount || '60'} onChange={e => updateLocal('referral_reward_amount', e.target.value)} />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Trial Sample Price — No Referral (₹)</label>
+            <input type="number" className="form-input" value={localSettings.free_sample_price || '99'} onChange={e => updateLocal('free_sample_price', e.target.value)} />
           </div>
         </div>
 
@@ -251,6 +255,28 @@ export function SettingsPage() {
           <Button variant="primary" onClick={handleSaveDiscounts} disabled={discountSaving || durationDiscounts.length === 0}>
             {discountSaving ? 'Saving...' : 'Save Duration Discounts'}
           </Button>
+        </div>
+      </div>
+
+      {/* Rider Operations */}
+      <div className="card" style={{ marginTop: 16 }}>
+        <div className="card-title">Rider Operations</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+          <div className="form-group">
+            <label className="form-label">Attendance Start (IST)</label>
+            <input type="time" className="form-input" value={localSettings.rider_attendance_start || '03:45'} onChange={e => updateLocal('rider_attendance_start', e.target.value)} />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Attendance End (IST)</label>
+            <input type="time" className="form-input" value={localSettings.rider_attendance_end || '05:00'} onChange={e => updateLocal('rider_attendance_end', e.target.value)} />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Lockout Time (IST)</label>
+            <input type="time" className="form-input" value={localSettings.rider_lockout_time || '06:45'} onChange={e => updateLocal('rider_lockout_time', e.target.value)} />
+          </div>
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 4 }}>
+          Riders must check in between Attendance Start and End. They are locked out after Lockout Time.
         </div>
       </div>
     </div>

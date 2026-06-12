@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react"
 import { supabase } from "../../lib/supabase"
 import { Badge } from "../ui/Badge"
 import { LoadingSpinner } from "../ui/LoadingSpinner"
+import { UserNameLink } from "../ui/UserNameLink"
 
 export function ReferralsPage() {
   const [loading, setLoading] = useState(true)
@@ -16,7 +17,7 @@ export function ReferralsPage() {
     try {
       const { data, error } = await supabase
         .from("referrals")
-        .select("*, referrer:users!referrer_id(full_name, phone_number), referee:users!referee_id(full_name, phone_number)")
+        .select("*, referrer:users!referrer_id(id, full_name, phone_number), referee:users!referee_id(id, full_name, phone_number)")
         .order("created_at", { ascending: false })
       if (error) throw error
       setReferrals(data || [])
@@ -53,8 +54,8 @@ export function ReferralsPage() {
               <tr key={ref.id}>
                 <td>{new Date(ref.created_at).toLocaleDateString()}</td>
                 <td><code style={{ fontSize: 11, background: 'var(--bg)', padding: '2px 6px', borderRadius: 4 }}>{ref.referral_code || '—'}</code></td>
-                <td>{ref.referrer?.full_name || ref.referrer?.phone_number}</td>
-                <td>{ref.referee?.full_name || ref.referee?.phone_number}</td>
+                <td><UserNameLink userId={ref.referrer?.id} name={ref.referrer?.full_name || ref.referrer?.phone_number} /></td>
+                <td><UserNameLink userId={ref.referee?.id} name={ref.referee?.full_name || ref.referee?.phone_number} /></td>
                 <td>₹{ref.referrer_reward_amount}</td>
                 <td>₹{ref.referee_reward_amount}</td>
                 <td><Badge variant={ref.status === "rewarded" ? "success" : ref.status === "expired" || ref.status === "cancelled" ? "danger" : "warning"}>{ref.status}</Badge></td>

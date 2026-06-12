@@ -14,6 +14,7 @@ import { Drawer } from '../ui/Drawer';
 import { LoadingSpinner } from '../ui/LoadingSpinner';
 import { Select } from '../ui/Select';
 import { useDataRefresh } from '../../hooks/useDataRefresh';
+import { UserNameLink } from '../ui/UserNameLink';
 
 const STATUS_FILTERS = [
   { value: 'all', label: 'All Statuses' },
@@ -42,6 +43,7 @@ export function BottleReturnsPage() {
   const [selectedReturn, setSelectedReturn] = useState(null);
   const [markingId, setMarkingId] = useState(null);
   const [markMsg, setMarkMsg] = useState(null);
+  const [photoModal, setPhotoModal] = useState(null);
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -58,6 +60,8 @@ export function BottleReturnsPage() {
         .from('bottle_returns')
         .select(`
           id,
+          user_id,
+          order_id,
           status,
           quantity,
           return_date,
@@ -69,7 +73,8 @@ export function BottleReturnsPage() {
           riders:rider_id ( users ( full_name ) ),
           addresses:address_id ( address_line1, city ),
           routes:route_id ( name ),
-          route_stops:route_stop_id ( name )
+          route_stops:route_stop_id ( name ),
+          orders:order_id ( order_number, bottle_photo_url )
         `)
         .order('created_at', { ascending: false });
 
@@ -190,24 +195,26 @@ export function BottleReturnsPage() {
                 <th>Route / Stop</th>
                 <th>Rider</th>
                 <th>Qty 🍶</th>
+                <th>Type</th>
+                <th>Linked Order</th>
                 <th>Return Date</th>
                 <th>Status</th>
                 <th>Collected At</th>
+                <th>Photo</th>
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {returns.length === 0 ? (
                 <tr>
-                  <td colSpan={9} style={{ textAlign: 'center', padding: 24, color: 'var(--text-4)' }}>
+                  <td colSpan={12} style={{ textAlign: 'center', padding: 24, color: 'var(--text-4)' }}>
                     No bottle returns found
                   </td>
                 </tr>
               ) : returns.map(r => (
                 <tr key={r.id}>
                   <td>
-                    <div style={{ fontWeight: 500 }}>{r.users?.full_name || '—'}</div>
-                    <div style={{ fontSize: 11, color: 'var(--text-4)' }}>{r.users?.phone_number}</div>
+                    <UserNameLink userId={r.user_id} name={r.users?.full_name} phone={r.users?.phone_number} />
                   </td>
                   <td style={{ fontSize: 12, color: 'var(--text-3)' }}>
                     {r.addresses?.address_line1 || '—'}
@@ -222,6 +229,28 @@ export function BottleReturnsPage() {
                   </td>
                   <td style={{ fontFamily: "'DM Mono',monospace", fontWeight: 600 }}>
                     🍶 {r.quantity}
+                  </td>
+                  <td>
+                    <span style={{
+                      display: 'inline-block',
+                      padding: '2px 7px',
+                      borderRadius: 4,
+                      fontSize: 10.5,
+                      fontWeight: 600,
+                      background: r.order_id ? 'rgba(59,130,246,0.1)' : 'rgba(234,179,8,0.1)',
+                      color: r.order_id ? '#3b82f6' : '#ca8a04',
+                    }}>
+                      {r.order_id ? '⚡ Auto' : '📋 Manual'}
+                    </span>
+                  </td>
+                  <td style={{ fontSize: 11.5, fontFamily: "'DM Mono',monospace" }}>
+                    {r.orders?.order_number ? (
+                      <span style={{ color: 'var(--primary, #3b82f6)', cursor: 'default' }} title="Linked delivery order">
+                        {r.orders.order_number}
+                      </span>
+                    ) : (
+                      <span style={{ color: 'var(--text-4)' }}>—</span>
+                    )}
                   </td>
                   <td style={{ fontSize: 12, color: 'var(--text-3)' }}>
                     {fmtDate(r.return_date)}
@@ -242,6 +271,18 @@ export function BottleReturnsPage() {
                   </td>
                   <td style={{ fontSize: 11.5, color: 'var(--text-3)' }}>
                     {r.collected_at ? `${fmtDate(r.collected_at)} ${fmtTime(r.collected_at)}` : '—'}
+                  </td>
+                  <td>
+                    {r.photo_url || r.orders?.bottle_photo_url ? (
+                      <div
+                        onClick={() => setPhotoModal(r.photo_url || r.orders?.bottle_photo_url)}
+                        style={{ cursor: 'zoom-in', width: 40, height: 40, borderRadius: 6, overflow: 'hidden', border: '1px solid var(--border)' }}
+                      >
+                        <img src={r.photo_url || r.orders?.bottle_photo_url} alt="Return" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      </div>
+                    ) : (
+                      <span style={{ fontSize: 11, color: 'var(--text-4)' }}>—</span>
+                    )}
                   </td>
                   <td>
                     <div style={{ display: 'flex', gap: 4 }}>
@@ -321,11 +362,11 @@ export function BottleReturnsPage() {
             </div>
           )}
 
-          {selectedReturn.photo_url && (
+          {(selectedReturn.photo_url || selectedReturn.orders?.bottle_photo_url) && (
             <div style={{ marginBottom: 12 }}>
               <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 6 }}>Bottle Photo</div>
               <img
-                src={selectedReturn.photo_url}
+                src={selectedReturn.photo_url || selectedReturn.orders?.bottle_photo_url}
                 alt="Bottle return proof"
                 style={{ width: '100%', maxHeight: 200, objectFit: 'cover', borderRadius: 8, border: '1px solid var(--border)' }}
               />
@@ -353,6 +394,36 @@ export function BottleReturnsPage() {
             </Button>
           )}
         </Drawer>
+      )}
+
+      {/* PHOTO LIGHTBOX MODAL */}
+      {photoModal && (
+        <div
+          onClick={() => setPhotoModal(null)}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 9999,
+            background: 'rgba(0,0,0,0.85)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            cursor: 'zoom-out', padding: 24,
+          }}
+        >
+          <img
+            src={photoModal}
+            alt="Full size"
+            style={{ maxWidth: '100%', maxHeight: '90vh', borderRadius: 10, objectFit: 'contain', boxShadow: '0 8px 40px rgba(0,0,0,0.5)' }}
+            onClick={e => e.stopPropagation()}
+          />
+          <button
+            onClick={() => setPhotoModal(null)}
+            style={{
+              position: 'absolute', top: 16, right: 20,
+              background: 'rgba(255,255,255,0.15)', border: 'none',
+              color: '#fff', fontSize: 22, cursor: 'pointer',
+              width: 36, height: 36, borderRadius: '50%',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}
+          >✕</button>
+        </div>
       )}
     </div>
   );

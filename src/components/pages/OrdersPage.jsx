@@ -8,6 +8,7 @@
 
 import React, { useState } from 'react';
 import { useOrders } from '../../hooks/useOrders';
+import { useDrivers } from '../../hooks/useDrivers';
 import { useDataRefresh } from '../../hooks/useDataRefresh';
 import { Select } from '../ui/Select';
 import { Button } from '../ui/Button';
@@ -16,6 +17,7 @@ import { Drawer } from '../ui/Drawer';
 import { Modal } from '../ui/Modal';
 import { LoadingSpinner } from '../ui/LoadingSpinner';
 import { SearchInput } from '../ui/SearchInput';
+import { UserNameLink } from '../ui/UserNameLink';
 import { ORDER_STATUSES, FAIL_REASONS } from '../../constants';
 
 const STATUSES = [
@@ -34,9 +36,11 @@ export function OrdersPage() {
     updateOrderNotes,
     reassignDriver,
     retryOrder,
+    autoAssignOrders,
     refresh,
   } = useOrders();
 
+  const { drivers } = useDrivers();
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [failModal, setFailModal] = useState(null);
   const [failReasonEdit, setFailReasonEdit] = useState('');
@@ -47,6 +51,10 @@ export function OrdersPage() {
   const [deliverMsg, setDeliverMsg] = useState(null);
   const [search, setSearch] = useState('');
   const [photoModal, setPhotoModal] = useState(null); // url string or null
+  const [reassignModal, setReassignModal] = useState(null); // order object
+  const [selectedDriver, setSelectedDriver] = useState('');
+  const [reassigning, setReassigning] = useState(false);
+  const [autoAssigning, setAutoAssigning] = useState(false);
 
   useDataRefresh(refresh, 60000, true);
 
@@ -94,6 +102,28 @@ export function OrdersPage() {
     }
   };
 
+  const handleReassignSubmit = async () => {
+    if (!selectedDriver || !reassignModal) return;
+    setReassigning(true);
+    const result = await reassignDriver(reassignModal.id, selectedDriver);
+    setReassigning(false);
+    if (result.success) {
+      setReassignModal(null);
+      setSelectedOrder(prev => prev ? { ...prev, riderId: selectedDriver } : null);
+    } else {
+      alert("Failed to reassign: " + result.error);
+    }
+  };
+
+  const handleAutoAssign = async () => {
+    setAutoAssigning(true);
+    const result = await autoAssignOrders(filters.date);
+    setAutoAssigning(false);
+    if (!result.success) {
+      alert("Auto-assignment failed: " + result.error);
+    }
+  };
+
   if (loading && orders.length === 0) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', padding: '40px' }}>
@@ -112,9 +142,14 @@ export function OrdersPage() {
 
   return (
     <div>
-      <div className="page-header">
-        <div className="page-title">Orders</div>
-        <div className="page-sub">{orders.length} orders today</div>
+      <div className="page-header" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+        <div>
+          <div className="page-title">Orders</div>
+          <div className="page-sub">{orders.length} orders for selected date</div>
+        </div>
+        <Button variant="primary" onClick={handleAutoAssign} disabled={autoAssigning}>
+          {autoAssigning ? 'Running...' : 'Run Auto-Assignment'}
+        </Button>
       </div>
 
       <div className="search-filter">
@@ -165,7 +200,7 @@ export function OrdersPage() {
                   <td style={{ fontFamily: "'DM Mono',monospace", fontSize: 11.5, color: "var(--text-3)" }}>
                     {o.orderNumber}
                   </td>
-                  <td style={{ fontWeight: 500 }}>{o.customerName}</td>
+                  <td><UserNameLink userId={o.customerId} name={o.customerName} /></td>
                   <td style={{ fontSize: 11.5, color: "var(--text-3)" }}>{o.stopName}</td>
                   <td>{o.productName} <span style={{ color: "var(--text-4)", fontSize: 11 }}>{o.productUnit}</span></td>
                   <td>×{o.quantity}</td>
@@ -221,6 +256,14 @@ export function OrdersPage() {
                 : `×${selectedOrder.quantity}` },
               { label: "Amount", val: selectedOrder.amount === 0 ? '₹0 (Free)' : `₹${selectedOrder.amount}` },
               { label: "Stop", val: selectedOrder.stopName },
+              { label: "Assigned Rider", val: (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {selectedOrder.riderId ? drivers.find(d => d.id === selectedOrder.riderId)?.name || 'Unknown' : 'Auto (via Route)'}
+                    </span>
+                    <Button size="sm" onClick={() => { setReassignModal(selectedOrder); setSelectedDriver(selectedOrder.riderId || ''); }}>Change</Button>
+                  </div>
+              ) },
             ].map(r => (
               <div key={r.label} style={{ background: "var(--bg)", padding: "10px 12px", borderRadius: 7 }}>
                 <div style={{ fontSize: 11, color: "var(--text-3)", marginBottom: 3 }}>{r.label}</div>
@@ -435,6 +478,39 @@ export function OrdersPage() {
               {retryMsg.text}
             </div>
           )}
+        </Modal>
+      )}
+
+      {/* REASSIGN MODAL */}
+      {reassignModal && (
+        <Modal
+          title={`Reassign Order — ${reassignModal.orderNumber}`}
+          onClose={() => setReassignModal(null)}
+          footer={
+            <>
+              <Button onClick={() => setReassignModal(null)}>Cancel</Button>
+              <Button variant="primary" onClick={handleReassignSubmit} disabled={reassigning || !selectedDriver}>
+                {reassigning ? 'Reassigning...' : 'Confirm Assignment'}
+              </Button>
+            </>
+          }
+        >
+          <div className="form-group">
+            <label className="form-label">Select Driver for Order</label>
+            <select
+              className="form-select"
+              value={selectedDriver}
+              onChange={e => setSelectedDriver(e.target.value)}
+            >
+              <option value="">— Select a Driver —</option>
+              {drivers.filter(d => d.status === 'active').map(d => (
+                <option key={d.id} value={d.id}>{d.name} ({d.phone})</option>
+              ))}
+            </select>
+          </div>
+          <div style={{ padding: '10px 12px', background: 'var(--bg)', borderRadius: 7, fontSize: 12, color: 'var(--text-3)', marginTop: 4 }}>
+            ℹ️ Reassigning an order will explicitly force it to this driver, bypassing standard route assignments.
+          </div>
         </Modal>
       )}
     </div>

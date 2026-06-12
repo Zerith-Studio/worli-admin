@@ -13,6 +13,7 @@ import { StatusBadge } from '../ui/StatusBadge';
 import { Pagination } from '../ui/Pagination';
 import { Modal } from '../ui/Modal';
 import { LoadingSpinner } from '../ui/LoadingSpinner';
+import { UserNameLink } from '../ui/UserNameLink';
 import { SUBSCRIPTION_TYPES, SUBSCRIPTION_STATUSES } from '../../constants';
 
 const TYPES = [{ value: 'all', label: 'All Types' }, ...SUBSCRIPTION_TYPES];
@@ -113,8 +114,7 @@ export function SubscriptionsPage() {
               ) : subscriptions.map(s => (
                 <tr key={s.id}>
                   <td>
-                    <div style={{ fontWeight: 500 }}>{s.customerName}</div>
-                    <div style={{ fontSize: 11, color: 'var(--text-4)' }}>{s.customerPhone}</div>
+                    <UserNameLink userId={s.customerId} name={s.customerName} phone={s.customerPhone} />
                   </td>
                   <td>
                     {s.productName}

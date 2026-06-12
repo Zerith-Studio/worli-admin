@@ -206,6 +206,17 @@ export function useOrders() {
     [fetchOrders],
   )
 
+  const autoAssignOrders = useCallback(async (date) => {
+    try {
+      const { error } = await supabase.rpc('assign_riders_to_orders', { p_date: date })
+      if (error) throw error
+      await fetchOrders()
+      return { success: true }
+    } catch (err) {
+      return { success: false, error: err.message }
+    }
+  }, [fetchOrders])
+
   const updateFilters = useCallback((newFilters) => {
     setFilters((prev) => ({ ...prev, ...newFilters }))
     setPage(1)
@@ -230,6 +241,7 @@ export function useOrders() {
     updateOrderNotes,
     reassignDriver,
     retryOrder,
+    autoAssignOrders,
     refresh: fetchOrders,
   }
 }

@@ -4,6 +4,7 @@ import { Badge } from "../ui/Badge"
 import { Button } from "../ui/Button"
 import { Modal } from "../ui/Modal"
 import { LoadingSpinner } from "../ui/LoadingSpinner"
+import { UserNameLink } from "../ui/UserNameLink"
 
 export function SupportTicketsPage() {
   const [loading, setLoading] = useState(true)
@@ -13,7 +14,6 @@ export function SupportTicketsPage() {
   const [status, setStatus] = useState("open")
   const [saving, setSaving] = useState(false)
 
-  const [selectedUser, setSelectedUser] = useState(null)
 
   useEffect(() => {
     fetchTickets()
@@ -85,22 +85,7 @@ export function SupportTicketsPage() {
                 <td>{ticket.ticket_number}</td>
                 <td>{new Date(ticket.created_at).toLocaleString()}</td>
                 <td>
-                  <div 
-                    style={{ color: "var(--accent)", cursor: "pointer", fontWeight: 500 }}
-                    onClick={() => {
-                      const user = ticket.users;
-                      const walletRaw = user?.wallets;
-                      const wallet = Array.isArray(walletRaw) ? walletRaw[0] : walletRaw;
-                      const balance = wallet?.balance ?? 0;
-                      setSelectedUser({
-                        ...user,
-                        wallet_balance: balance,
-                        status: user?.is_active === false ? "inactive" : "active"
-                      });
-                    }}
-                  >
-                    {ticket.users?.full_name || ticket.users?.phone_number || "Unknown"}
-                  </div>
+                  <UserNameLink userId={ticket.users?.id} name={ticket.users?.full_name || ticket.users?.phone_number || 'Unknown'} />
                 </td>
                 <td>{ticket.subject}</td>
                 <td><Badge variant={ticket.status === "open" ? "warning" : ticket.status === "resolved" || ticket.status === "closed" ? "success" : "neutral"}>{ticket.status}</Badge></td>
@@ -143,36 +128,6 @@ export function SupportTicketsPage() {
         </Modal>
       )}
 
-      {selectedUser && (
-        <Modal title="User Details" onClose={() => setSelectedUser(null)} footer={
-          <div style={{ display: "flex", justifyContent: "flex-end" }}>
-            <Button variant="secondary" onClick={() => setSelectedUser(null)}>Close</Button>
-          </div>
-        }>
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <div className="kpi-grid" style={{ gridTemplateColumns: "1fr 1fr", marginBottom: 0 }}>
-              <div className="kpi-card" style={{ padding: 12 }}>
-                <div className="kpi-label">Name</div>
-                <div style={{ fontSize: 16, fontWeight: 600 }}>{selectedUser.full_name || "-"}</div>
-              </div>
-              <div className="kpi-card" style={{ padding: 12 }}>
-                <div className="kpi-label">Phone</div>
-                <div style={{ fontSize: 16, fontWeight: 600 }}>{selectedUser.phone_number || "-"}</div>
-              </div>
-              <div className="kpi-card" style={{ padding: 12 }}>
-                <div className="kpi-label">Wallet Balance</div>
-                <div style={{ fontSize: 16, fontWeight: 600, color: selectedUser.wallet_balance < 0 ? "var(--red)" : "var(--green)" }}>
-                  ₹{selectedUser.wallet_balance || 0}
-                </div>
-              </div>
-              <div className="kpi-card" style={{ padding: 12 }}>
-                <div className="kpi-label">Status</div>
-                <div><Badge variant={selectedUser.status === "active" ? "success" : "neutral"}>{selectedUser.status || "Unknown"}</Badge></div>
-              </div>
-            </div>
-          </div>
-        </Modal>
-      )}
     </div>
   )
 }

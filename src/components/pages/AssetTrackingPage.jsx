@@ -9,6 +9,7 @@ import { useDataRefresh } from '../../hooks/useDataRefresh';
 import { ProgressBar } from '../ui/ProgressBar';
 import { StatusBadge } from '../ui/StatusBadge';
 import { LoadingSpinner } from '../ui/LoadingSpinner';
+import { UserNameLink } from '../ui/UserNameLink';
 
 export function AssetTrackingPage() {
   const { assets, rawReturns, stats, loading, error, refresh } = useAssets();
@@ -136,7 +137,7 @@ export function AssetTrackingPage() {
             <tbody>
               {assets.map(a => (
                 <tr key={a.id}>
-                  <td style={{ fontWeight: 500 }}>{a.name}</td>
+                  <td><UserNameLink userId={a.id} name={a.name} /></td>
                   <td style={{ fontSize: 11.5, color: "var(--text-3)" }}>{a.zone}</td>
                   <td style={{ fontFamily: "'DM Mono',monospace" }}>{a.issued}</td>
                   <td style={{ fontFamily: "'DM Mono',monospace", color: "var(--green)" }}>{a.returned}</td>

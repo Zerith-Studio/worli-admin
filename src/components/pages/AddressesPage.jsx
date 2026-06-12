@@ -3,6 +3,7 @@ import { supabase } from "../../lib/supabase"
 import { Badge } from "../ui/Badge"
 import { Button } from "../ui/Button"
 import { LoadingSpinner } from "../ui/LoadingSpinner"
+import { UserNameLink } from "../ui/UserNameLink"
 
 const PAGE_SIZE = 20
 
@@ -250,8 +251,7 @@ export function AddressesPage() {
                         background: isActive ? "var(--accent-subtle, rgba(99,102,241,0.08))" : undefined,
                       }}>
                         <td>
-                          <div style={{ fontWeight: 500 }}>{addr.users?.full_name || "—"}</div>
-                          <div style={{ fontSize: 11, color: "var(--text-3)" }}>{addr.users?.phone_number}</div>
+                          <UserNameLink userId={addr.user_id} name={addr.users?.full_name} phone={addr.users?.phone_number} />
                           {addr.name && <div style={{ fontSize: 10.5, color: 'var(--accent)', fontWeight: 500, marginTop: 2 }}>{addr.name}</div>}
                           {addr.is_default && <Badge variant="info" style={{ fontSize: 10 }}>Default</Badge>}
                         </td>
