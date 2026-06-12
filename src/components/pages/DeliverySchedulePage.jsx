@@ -5,12 +5,14 @@
 // ============================================
 
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import { useSettings } from '../../hooks/useSettings';
 import { Button } from '../ui/Button';
 import { LoadingSpinner } from '../ui/LoadingSpinner';
 
 export function DeliverySchedulePage() {
+  const navigate = useNavigate();
   const [timeLeft, setTimeLeft] = useState('00:00:00');
   const [scheduleData, setScheduleData] = useState([]);
   const [scheduleLoading, setScheduleLoading] = useState(true);
@@ -118,7 +120,7 @@ export function DeliverySchedulePage() {
                 <span style={{ fontFamily: "'DM Mono',monospace" }}>{z.orders} orders</span>
               </div>
               <div style={{ marginTop: 8, display: 'flex', gap: 6 }}>
-                <Button size="sm">View Orders</Button>
+                <Button size="sm" onClick={() => navigate('/orders')}>View Orders</Button>
               </div>
             </div>
           ))}
