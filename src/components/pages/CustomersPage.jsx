@@ -12,6 +12,7 @@ import { Select } from '../ui/Select';
 import { Pagination } from '../ui/Pagination';
 import { StatusBadge } from '../ui/StatusBadge';
 import { Drawer } from '../ui/Drawer';
+import { Modal } from '../ui/Modal';
 import { Button } from '../ui/Button';
 import { LoadingSpinner } from '../ui/LoadingSpinner';
 
@@ -25,12 +26,14 @@ const STATUSES = [
 export function CustomersPage() {
   const {
     customers, loading, error, page, totalPages, totalCount,
-    filters, minWalletBalance, updateFilters, goToPage, updateUserStatus, refresh,
+    filters, minWalletBalance, updateFilters, goToPage, updateUserStatus, triggerAutoRecharge, refresh,
   } = useCustomers();
 
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [tab, setTab] = useState('info');
   const [statusMsg, setStatusMsg] = useState(null);
+  const [showRechargeModal, setShowRechargeModal] = useState(false);
+  const [rechargeState, setRechargeState] = useState({ loading: false, error: null, successMsg: null });
 
   useDataRefresh(refresh, 60000, true);
 
@@ -172,6 +175,52 @@ export function CustomersPage() {
               <div style={{ marginTop: 8, fontSize: 12, color: 'var(--text-3)' }}>
                 Low balance threshold: ₹{minWalletBalance}
               </div>
+
+              {selectedCustomer.auto_recharge_enabled ? (
+                <div style={{ marginTop: 24, padding: 16, background: 'var(--bg)', borderRadius: 8, border: '1px solid var(--border)' }}>
+                  <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span>⚡ AutoPay Enabled</span>
+                    {selectedCustomer.razorpay_token_id ? (
+                      <span style={{ fontSize: 11, color: 'var(--green)', background: 'var(--green-bg)', padding: '2px 6px', borderRadius: 4 }}>Token Active</span>
+                    ) : (
+                      <span style={{ fontSize: 11, color: 'var(--yellow)', background: 'var(--yellow-bg)', padding: '2px 6px', borderRadius: 4 }}>Pending Token</span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: 13, color: 'var(--text-3)', marginBottom: 12 }}>
+                    Trigger Amount: <strong style={{color: 'var(--text)'}}>₹{selectedCustomer.auto_recharge_trigger_amount || 0}</strong><br/>
+                    Recharge Amount: <strong style={{color: 'var(--text)'}}>₹{selectedCustomer.auto_recharge_amount || 0}</strong>
+                  </div>
+                  
+                  {rechargeState.successMsg && (
+                    <div style={{ marginBottom: 12, padding: '8px 12px', background: 'var(--green-bg)', color: 'var(--green)', borderRadius: 6, fontSize: 13 }}>
+                      {rechargeState.successMsg}
+                    </div>
+                  )}
+                  {rechargeState.error && (
+                    <div style={{ marginBottom: 12, padding: '8px 12px', background: 'var(--red-bg)', color: 'var(--red)', borderRadius: 6, fontSize: 13 }}>
+                      {rechargeState.error}
+                    </div>
+                  )}
+
+                  <Button 
+                    variant="primary" 
+                    style={{ width: '100%' }}
+                    onClick={() => {
+                      setRechargeState({ loading: false, error: null, successMsg: null });
+                      setShowRechargeModal(true);
+                    }}
+                    disabled={!selectedCustomer.razorpay_token_id}
+                  >
+                    Manually Trigger Auto-Recharge
+                  </Button>
+                </div>
+              ) : (
+                <div style={{ marginTop: 24, padding: 16, background: 'var(--bg)', borderRadius: 8, border: '1px solid var(--border)', textAlign: 'center' }}>
+                  <div style={{ fontSize: 13, color: 'var(--text-3)' }}>
+                    AutoPay is not enabled for this customer. They must set it up from the Consumer App.
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -235,6 +284,70 @@ export function CustomersPage() {
             </div>
           )}
         </Drawer>
+      )}
+
+      {showRechargeModal && selectedCustomer && (
+        <Modal title="Confirm Manual Auto-Recharge" onClose={() => !rechargeState.loading && setShowRechargeModal(false)}>
+          <div style={{ padding: '0 4px' }}>
+            <p style={{ fontSize: 14, color: 'var(--text-2)', marginBottom: 16 }}>
+              You are about to trigger a manual AutoPay deduction for <strong>{selectedCustomer.name}</strong>.
+            </p>
+            
+            <div style={{ background: 'var(--bg-2)', padding: 16, borderRadius: 8, marginBottom: 24 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                <span style={{ color: 'var(--text-3)', fontSize: 13 }}>Current Balance:</span>
+                <span style={{ fontFamily: "'DM Mono',monospace", fontWeight: 600, color: selectedCustomer.wallet < 0 ? 'var(--red)' : 'var(--green)' }}>
+                  ₹{selectedCustomer.wallet.toLocaleString()}
+                </span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                <span style={{ color: 'var(--text-3)', fontSize: 13 }}>Auto-Recharge Trigger Limit:</span>
+                <span style={{ fontFamily: "'DM Mono',monospace", fontWeight: 500 }}>
+                  ₹{selectedCustomer.auto_recharge_trigger_amount || 0}
+                </span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px dashed var(--border)', paddingTop: 8, marginTop: 4 }}>
+                <span style={{ color: 'var(--text-2)', fontSize: 14, fontWeight: 500 }}>Amount to Charge:</span>
+                <span style={{ fontFamily: "'DM Mono',monospace", fontWeight: 700, fontSize: 16 }}>
+                  ₹{selectedCustomer.auto_recharge_amount || 0}
+                </span>
+              </div>
+            </div>
+
+            {rechargeState.error && (
+              <div style={{ padding: 12, background: 'var(--red-bg)', color: 'var(--red)', borderRadius: 6, fontSize: 13, marginBottom: 16 }}>
+                Error: {rechargeState.error}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
+              <Button variant="secondary" onClick={() => setShowRechargeModal(false)} disabled={rechargeState.loading}>
+                Cancel
+              </Button>
+              <Button 
+                variant="primary" 
+                onClick={async () => {
+                  setRechargeState(prev => ({ ...prev, loading: true, error: null }));
+                  const res = await triggerAutoRecharge(selectedCustomer.id);
+                  if (res.success) {
+                    setRechargeState({ loading: false, error: null, successMsg: `Successfully charged ₹${res.amount_charged} via AutoPay.` });
+                    setShowRechargeModal(false);
+                    // Update local state to reflect new balance tentatively
+                    setSelectedCustomer(prev => ({
+                      ...prev,
+                      wallet: prev.wallet + res.amount_charged
+                    }));
+                  } else {
+                    setRechargeState({ loading: false, error: res.error, successMsg: null });
+                  }
+                }}
+                disabled={rechargeState.loading}
+              >
+                {rechargeState.loading ? 'Processing...' : 'Confirm Charge'}
+              </Button>
+            </div>
+          </div>
+        </Modal>
       )}
     </div>
   );

@@ -37,7 +37,7 @@ export function useCustomers() {
       let query = supabase.from("users").select(
         `
           id, full_name, phone_number, email, bottles_pending, created_at, is_active,
-          wallets(balance),
+          wallets(balance, auto_recharge_enabled, razorpay_token_id, auto_recharge_amount, auto_recharge_trigger_amount),
           addresses(city, is_default),
           subscriptions!left(id, status)
         `,
@@ -94,6 +94,10 @@ export function useCustomers() {
             joined: user.created_at?.split("T")[0],
             totalOrders: user.subscriptions?.length || 0,
             activeSubscriptions: activeSubs.length,
+            auto_recharge_enabled: wallet?.auto_recharge_enabled || false,
+            razorpay_token_id: wallet?.razorpay_token_id,
+            auto_recharge_amount: wallet?.auto_recharge_amount,
+            auto_recharge_trigger_amount: wallet?.auto_recharge_trigger_amount,
           }
         }) || []
 
@@ -151,6 +155,20 @@ export function useCustomers() {
 
   const totalPages = Math.ceil(totalCount / PAGE_SIZE)
 
+  const triggerAutoRecharge = useCallback(async (userId) => {
+    try {
+      const { data, error } = await supabase.functions.invoke("trigger-autopay-charge", {
+        body: { user_id: userId }
+      })
+      if (error) throw error
+      if (!data?.triggered) throw new Error(data?.reason || "Failed to trigger recharge")
+      await fetchCustomers(true)
+      return { success: true, amount_charged: data.amount_charged }
+    } catch (err) {
+      return { success: false, error: err.message }
+    }
+  }, [fetchCustomers])
+
   return {
     customers,
     loading,
@@ -163,6 +181,7 @@ export function useCustomers() {
     updateFilters,
     goToPage,
     updateUserStatus,
+    triggerAutoRecharge,
     refresh: fetchCustomers,
   }
 }
