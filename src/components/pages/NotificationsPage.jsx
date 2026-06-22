@@ -7,6 +7,7 @@ import React, { useState, useEffect, useCallback } from "react"
 import { supabase } from "../../lib/supabase"
 import { Button } from "../ui/Button"
 import { Modal } from "../ui/Modal"
+import { Drawer } from "../ui/Drawer"
 
 // ─── Notification type badge colors ──────────────────────────
 const TYPE_COLORS = {
@@ -164,6 +165,92 @@ function UserSearch({ selectedUsers, onSelectionChange }) {
   )
 }
 
+// ─── Notification Detail Drawer ───────────────────────────────
+// Shows every field stored on a push_notifications row.
+function NotificationDetailDrawer({ notif, onClose }) {
+  const [recipients, setRecipients] = useState(null)
+
+  // Resolve the user_ids list (if any) into names for readability.
+  useEffect(() => {
+    let active = true
+    const ids = notif.user_ids
+    if (Array.isArray(ids) && ids.length > 0) {
+      supabase
+        .from("users")
+        .select("id, full_name, phone_number")
+        .in("id", ids)
+        .then(({ data }) => { if (active) setRecipients(data || []) })
+    }
+    return () => { active = false }
+  }, [notif.user_ids])
+
+  const fmt = (iso) =>
+    iso ? new Date(iso).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"
+
+  const Row = ({ label, children }) => (
+    <div className="stat-row" style={{ alignItems: "flex-start" }}>
+      <div className="stat-label" style={{ minWidth: 120 }}>{label}</div>
+      <div style={{ fontSize: 13, fontWeight: 500, textAlign: "right", wordBreak: "break-word", maxWidth: 300 }}>{children ?? "—"}</div>
+    </div>
+  )
+
+  return (
+    <Drawer title="Notification Details" onClose={onClose}>
+      <NotificationPreview title={notif.title} body={notif.body} imageUrl={notif.image_url} />
+
+      <div style={{ marginTop: 16 }}>
+        <Row label="ID"><span style={{ fontFamily: "'DM Mono',monospace", fontSize: 11.5 }}>{notif.id}</span></Row>
+        <Row label="Title">{notif.title}</Row>
+        <Row label="Body">{notif.body}</Row>
+        <Row label="Image URL">{notif.image_url
+          ? <a href={notif.image_url} target="_blank" rel="noreferrer" style={{ color: "var(--primary)" }}>{notif.image_url}</a>
+          : "—"}</Row>
+        <Row label="Target Type">{TARGET_LABELS[notif.target_type] ?? notif.target_type}</Row>
+        <Row label="Status">{notif.status}</Row>
+        <Row label="Sent Count"><span style={{ color: "var(--green)", fontWeight: 700 }}>{notif.sent_count}</span></Row>
+        <Row label="Failed Count"><span style={{ color: notif.failed_count > 0 ? "var(--red)" : "var(--text-3)" }}>{notif.failed_count}</span></Row>
+        <Row label="Sent By">{notif.sent_by
+          ? <span style={{ fontFamily: "'DM Mono',monospace", fontSize: 11.5 }}>{notif.sent_by}</span>
+          : "—"}</Row>
+        <Row label="Created At">{fmt(notif.created_at)}</Row>
+        <Row label="Sent At">{fmt(notif.sent_at)}</Row>
+        <Row label="Recipients">
+          {!Array.isArray(notif.user_ids) || notif.user_ids.length === 0
+            ? "All users (broadcast)"
+            : recipients === null
+              ? `${notif.user_ids.length} user(s) — loading…`
+              : `${notif.user_ids.length} user(s)`}
+        </Row>
+      </div>
+
+      {/* Resolved recipient list */}
+      {Array.isArray(notif.user_ids) && notif.user_ids.length > 0 && recipients && recipients.length > 0 && (
+        <div style={{ marginTop: 8, border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden" }}>
+          {recipients.map(u => (
+            <div key={u.id} style={{ padding: "7px 12px", borderBottom: "1px solid var(--border)" }}>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>{u.full_name || "—"}</div>
+              <div style={{ fontSize: 12, color: "var(--text-3)" }}>{u.phone_number}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Raw data payload */}
+      <div style={{ marginTop: 16 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-3)", marginBottom: 6, textTransform: "uppercase", letterSpacing: 1 }}>
+          Data Payload
+        </div>
+        <pre style={{
+          background: "var(--bg)", borderRadius: 8, padding: 12, fontSize: 11.5,
+          fontFamily: "'DM Mono',monospace", overflowX: "auto", margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word",
+        }}>
+          {JSON.stringify(notif.data ?? {}, null, 2)}
+        </pre>
+      </div>
+    </Drawer>
+  )
+}
+
 // ─── Main Page ────────────────────────────────────────────────
 export function NotificationsPage() {
   const [notifications, setNotifications] = useState([])
@@ -171,6 +258,7 @@ export function NotificationsPage() {
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [sending, setSending] = useState(false)
   const [sendResult, setSendResult] = useState(null)
+  const [selectedNotif, setSelectedNotif] = useState(null)
 
   const defaultForm = {
     title: "",
@@ -299,7 +387,7 @@ export function NotificationsPage() {
               {notifications.map((n) => {
                 const typeColor = TYPE_COLORS[n.data?.notification_type] ?? TYPE_COLORS.general
                 return (
-                  <tr key={n.id}>
+                  <tr key={n.id} onClick={() => setSelectedNotif(n)} style={{ cursor: "pointer" }} title="Click to view full details">
                     <td style={{ whiteSpace: "nowrap", fontSize: 12 }}>
                       {new Date(n.created_at).toLocaleString("en-IN", {
                         day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit",
@@ -344,6 +432,11 @@ export function NotificationsPage() {
           </table>
         )}
       </div>
+
+      {/* Notification detail drawer — shows every field from push_notifications */}
+      {selectedNotif && (
+        <NotificationDetailDrawer notif={selectedNotif} onClose={() => setSelectedNotif(null)} />
+      )}
 
       {/* Send Modal */}
       {isModalOpen && (

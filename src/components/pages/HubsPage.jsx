@@ -26,6 +26,9 @@ export function HubsPage() {
 
   const handleSave = async () => {
     if (!form.name.trim()) { setFormError('Hub name is required.'); return; }
+    if (form.contact_number && !/^\d{10}$/.test(form.contact_number)) {
+      setFormError('Contact number must be exactly 10 digits.'); return;
+    }
     const payload = { name: form.name, address: form.address, contact_number: form.contact_number };
     const result = modal.mode === 'create'
       ? await createHub(payload)
@@ -125,8 +128,18 @@ export function HubsPage() {
           </div>
           <div className="form-group">
             <label className="form-label">Contact Number</label>
-            <input className="form-input" placeholder="+91 XXXXX XXXXX" value={form.contact_number}
-              onChange={e => setForm(p => ({ ...p, contact_number: e.target.value }))} />
+            <input
+              className="form-input"
+              type="tel"
+              inputMode="numeric"
+              maxLength={10}
+              placeholder="10-digit number"
+              value={form.contact_number}
+              onChange={e => setForm(p => ({ ...p, contact_number: e.target.value.replace(/\D/g, '').slice(0, 10) }))}
+            />
+            <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 3 }}>
+              {form.contact_number.length}/10 digits
+            </div>
           </div>
         </Modal>
       )}

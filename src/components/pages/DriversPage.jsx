@@ -13,15 +13,17 @@ import { Drawer } from '../ui/Drawer';
 import { LoadingSpinner } from '../ui/LoadingSpinner';
 import { RIDER_STATUSES } from '../../constants';
 import { supabase } from '../../lib/supabase';
+import { AddRiderDrawer } from './AddRiderDrawer';
 
 export function DriversPage() {
   const {
     drivers, routes, hubs, loading, error,
     updateDriverStatus, updateDriverVerified, updateDriverProfile,
-    assignRoute, removeRoute, refresh,
+    assignRoute, removeRoute, createRider, searchPromotableUsers, refresh,
   } = useDrivers();
 
   const [selectedDriver, setSelectedDriver] = useState(null);
+  const [showAddRider, setShowAddRider] = useState(false);
   const [tab, setTab] = useState('profile');
   const [editForm, setEditForm] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -140,13 +142,18 @@ export function DriversPage() {
           <div className="page-sub">{drivers.length} drivers on team</div>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
-          <Button
-            variant="primary"
-            onClick={handleAssignRidersToOrders}
-            disabled={assigning}
-          >
-            {assigning ? 'Assigning...' : '🗺 Assign Riders to Today\'s Orders'}
-          </Button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <Button variant="secondary" onClick={() => setShowAddRider(true)}>
+              + Add Rider
+            </Button>
+            <Button
+              variant="primary"
+              onClick={handleAssignRidersToOrders}
+              disabled={assigning}
+            >
+              {assigning ? 'Assigning...' : '🗺 Assign Riders to Today\'s Orders'}
+            </Button>
+          </div>
           {assignMsg && (
             <span style={{
               fontSize: 12,
@@ -203,6 +210,14 @@ export function DriversPage() {
           </div>
         ))}
       </div>
+
+      {showAddRider && (
+        <AddRiderDrawer
+          searchPromotableUsers={searchPromotableUsers}
+          createRider={createRider}
+          onClose={(added) => { setShowAddRider(false); if (added) refresh(); }}
+        />
+      )}
 
       {selectedDriver && (
         <Drawer title={`Driver — ${selectedDriver.name}`} onClose={() => setSelectedDriver(null)}>

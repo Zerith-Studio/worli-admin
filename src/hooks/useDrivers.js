@@ -154,6 +154,49 @@ export function useDrivers() {
     }
   }, [fetchDrivers]);
 
+  // Promote an existing user to a rider (insert into riders table).
+  const createRider = useCallback(async (userId, vehicleInfo) => {
+    try {
+      const { error } = await supabase.from('riders').insert({
+        id: userId,
+        vehicle_info: vehicleInfo || null,
+        status: 'active',
+      });
+      if (error) throw error;
+      await fetchDrivers();
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  }, [fetchDrivers]);
+
+  // Search users (by name, phone, or id) who are not already riders.
+  const searchPromotableUsers = useCallback(async (q) => {
+    const term = (q || '').trim();
+    if (term.length < 2) return [];
+    try {
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(term);
+      let query = supabase.from('users').select('id, full_name, phone_number, email');
+      if (isUuid) {
+        query = query.eq('id', term);
+      } else {
+        query = query.or(`full_name.ilike.%${term}%,phone_number.ilike.%${term}%`);
+      }
+      const { data, error } = await query.limit(15);
+      if (error) throw error;
+
+      // Exclude users who are already riders.
+      const ids = (data || []).map(u => u.id);
+      if (ids.length === 0) return [];
+      const { data: existing } = await supabase.from('riders').select('id').in('id', ids);
+      const riderIds = new Set((existing || []).map(r => r.id));
+      return (data || []).filter(u => !riderIds.has(u.id));
+    } catch (err) {
+      console.error('Error searching users:', err);
+      return [];
+    }
+  }, []);
+
   const assignRoute = useCallback(async (riderId, routeId) => {
     try {
       const today = new Date().toISOString().split('T')[0];
@@ -187,7 +230,7 @@ export function useDrivers() {
   return {
     drivers, routes, hubs, loading, error,
     updateDriverStatus, updateDriverVerified, updateDriverProfile,
-    assignRoute, removeRoute,
+    assignRoute, removeRoute, createRider, searchPromotableUsers,
     refresh: fetchDrivers,
   };
 }

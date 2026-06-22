@@ -38,6 +38,7 @@ import {
   AddressesPage,
   BottleReturnsPage,
   AttendancePage,
+  ServiceAreaPage,
 } from "./components/pages"
 import { Button } from "./components/ui/Button"
 import { NAV_ITEMS, GROUP_LABELS } from "./constants"
@@ -128,6 +129,7 @@ function MainLayout({ groupedNav, logout }) {
             <Route path="/addresses" element={<AddressesPage />} />
             <Route path="/hubs" element={<HubsPage />} />
             <Route path="/routes" element={<RoutesPage />} />
+            <Route path="/service-area" element={<ServiceAreaPage />} />
             <Route path="/drivers" element={<DriversPage />} />
             <Route path="/attendance" element={<AttendancePage />} />
             <Route path="/wallet" element={<WalletPage />} />
