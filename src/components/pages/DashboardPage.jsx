@@ -20,6 +20,7 @@ export function DashboardPage({ onNav }) {
     todayFailed,
     todayPending,
     todayRevenue,
+    todayOrderValue,
     atRiskCustomers,
     pausedCustomers,
     lowBalanceCount,
@@ -58,7 +59,7 @@ export function DashboardPage({ onNav }) {
         </div>
       </div>
 
-      <div className="kpi-grid">
+      <div className="kpi-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))' }}>
         <div className="kpi-card">
           <div className="kpi-label">Total Customers</div>
           <div className="kpi-value">{totalCustomers.toLocaleString()}</div>
@@ -79,7 +80,12 @@ export function DashboardPage({ onNav }) {
         <div className="kpi-card">
           <div className="kpi-label">Today's Revenue</div>
           <div className="kpi-value">₹{todayRevenue.toLocaleString()}</div>
-          <div className="kpi-change" style={{ color: 'var(--text-3)' }}>From delivered orders</div>
+          <div className="kpi-change" style={{ color: 'var(--text-3)' }}>Payments collected (delivered)</div>
+        </div>
+        <div className="kpi-card">
+          <div className="kpi-label">Today's Order Value</div>
+          <div className="kpi-value">₹{todayOrderValue.toLocaleString()}</div>
+          <div className="kpi-change" style={{ color: 'var(--text-3)' }}>All orders billed today</div>
         </div>
       </div>
 

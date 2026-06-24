@@ -34,6 +34,7 @@ import {
   DiscountsPage,
   OffersPage,
   FreeSamplePage,
+  TrialApprovalsPage,
   ProductsPage,
   AddressesPage,
   BottleReturnsPage,
@@ -125,6 +126,7 @@ function MainLayout({ groupedNav, logout }) {
             <Route path="/discounts" element={<DiscountsPage />} />
             <Route path="/offers" element={<OffersPage />} />
             <Route path="/free-sample" element={<FreeSamplePage />} />
+            <Route path="/trial-approvals" element={<TrialApprovalsPage />} />
             <Route path="/products" element={<ProductsPage />} />
             <Route path="/addresses" element={<AddressesPage />} />
             <Route path="/hubs" element={<HubsPage />} />

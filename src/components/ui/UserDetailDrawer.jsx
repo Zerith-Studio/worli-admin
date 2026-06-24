@@ -65,6 +65,28 @@ export function UserDetailDrawer({ userId, onClose }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState('profile');
+  const [products, setProducts] = useState([]);
+
+  // Create Order state
+  const [orderForm, setOrderForm] = useState({ product_id: '', address_id: '', delivery_date: '', quantity: '1', amount: '0' });
+  const [orderState, setOrderState] = useState({ loading: false, error: null, success: null });
+
+  // Create Subscription state
+  const [subForm, setSubForm] = useState({ product_id: '', address_id: '', frequency: 'daily', quantity: '1', start_date: '', duration_months: '1', interval_days: '2', custom_quantities: { '0': 0, '1': 0, '2': 0, '3': 0, '4': 0, '5': 0, '6': 0 } });
+  const [subState, setSubState] = useState({ loading: false, error: null, success: null });
+
+  // Create Address state
+  const [addressForm, setAddressForm] = useState({ name: 'Home', address_line1: '', address_line2: '', floor_number: '', landmark: '', city: '', state: '', pincode: '', delivery_instructions: '', latitude: '', longitude: '' });
+  const [addressState, setAddressState] = useState({ loading: false, error: null, success: null });
+
+  // Wallet adjust state
+  const [walletForm, setWalletForm] = useState({ new_balance: '', create_txn: true, note: '' });
+  const [walletState, setWalletState] = useState({ loading: false, error: null, success: null });
+  const [showWalletForm, setShowWalletForm] = useState(false);
+
+  const [showOrderForm, setShowOrderForm] = useState(false);
+  const [showSubForm, setShowSubForm] = useState(false);
+  const [showAddressForm, setShowAddressForm] = useState(false);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -117,6 +139,138 @@ export function UserDetailDrawer({ userId, onClose }) {
   }, [userId]);
 
   useEffect(() => { if (userId) fetchAll(); }, [userId, fetchAll]);
+
+  // Fetch products for create forms
+  useEffect(() => {
+    supabase.from('products').select('id, name, price').eq('is_active', true).then(({ data }) => {
+      if (data) setProducts(data);
+    });
+  }, []);
+
+  const handleCreateOrder = async () => {
+    if (!orderForm.product_id || !orderForm.address_id || !orderForm.delivery_date) {
+      setOrderState({ loading: false, error: 'Product, address and delivery date are required.', success: null }); return;
+    }
+    setOrderState({ loading: true, error: null, success: null });
+    try {
+      const orderNum = `ADM-${Date.now().toString(36).toUpperCase()}`;
+      const payload = {
+        order_number: orderNum,
+        user_id: userId,
+        product_id: orderForm.product_id,
+        address_id: orderForm.address_id,
+        delivery_date: orderForm.delivery_date,
+        quantity: parseInt(orderForm.quantity) || 1,
+        amount: parseFloat(orderForm.amount) || 0,
+        status: 'scheduled',
+      };
+      
+      const res = await supabase.functions.invoke('admin-db-action', {
+        body: { action: 'insert', table: 'orders', payload }
+      });
+      if (res.error) throw new Error(res.error.message || JSON.stringify(res.error));
+      if (res.data?.error) throw new Error(res.data.error);
+      
+      setOrderState({ loading: false, error: null, success: `Order ${orderNum} created!` });
+      fetchAll();
+    } catch (err) { setOrderState({ loading: false, error: err.message, success: null }); }
+  };
+
+  const handleCreateSubscription = async () => {
+    if (!subForm.product_id || !subForm.address_id || !subForm.start_date) {
+      setSubState({ loading: false, error: 'Product, address and start date are required.', success: null }); return;
+    }
+    setSubState({ loading: true, error: null, success: null });
+    try {
+      // Create via the reserve-balance RPC so wallet funds are reserved and
+      // delivery orders are pre-generated (same path as the consumer app).
+      // This also derives end_date, so no more 400 from the missing column.
+      const params = {
+        p_user_id: userId,
+        p_product_id: subForm.product_id,
+        p_address_id: subForm.address_id,
+        p_frequency: subForm.frequency,
+        p_duration_months: parseInt(subForm.duration_months) || 1,
+        p_start_date: subForm.start_date,
+        p_quantity: parseInt(subForm.quantity) || 1,
+        p_interval_days: subForm.frequency === 'on_interval' ? (parseInt(subForm.interval_days) || 2) : null,
+        p_custom_quantities: subForm.frequency === 'custom' ? subForm.custom_quantities : null,
+      };
+
+      const res = await supabase.functions.invoke('admin-db-action', {
+        body: { action: 'rpc', fn: 'rpc_create_subscription', params }
+      });
+      if (res.error) throw new Error(res.error.message || JSON.stringify(res.error));
+      if (res.data?.error) {
+        const d = res.data.data;
+        if (d?.error === 'INSUFFICIENT_FUNDS') {
+          throw new Error(`Insufficient wallet balance. Short by ₹${Number(d.shortfall || 0).toFixed(2)}. Top up the wallet first.`);
+        }
+        throw new Error(res.data.error);
+      }
+
+      setSubState({ loading: false, error: null, success: 'Subscription created successfully!' });
+      setTimeout(() => setShowSubForm(false), 1500);
+      fetchAll();
+    } catch (err) { setSubState({ loading: false, error: err.message, success: null }); }
+  };
+
+  const handleAdjustWallet = async () => {
+    const newBal = parseFloat(walletForm.new_balance);
+    if (isNaN(newBal) || newBal < 0) {
+      setWalletState({ loading: false, error: 'Enter a valid non-negative balance.', success: null }); return;
+    }
+    setWalletState({ loading: true, error: null, success: null });
+    try {
+      const res = await supabase.functions.invoke('admin-db-action', {
+        body: {
+          action: 'rpc', fn: 'rpc_admin_adjust_wallet',
+          params: { p_user_id: userId, p_new_balance: newBal, p_create_txn: walletForm.create_txn, p_note: walletForm.note || null },
+        },
+      });
+      if (res.error) throw new Error(res.error.message || JSON.stringify(res.error));
+      if (res.data?.error) throw new Error(res.data.error);
+      setWalletState({ loading: false, error: null, success: `Balance updated to ${money(newBal)}.` });
+      setWalletForm({ new_balance: '', create_txn: true, note: '' });
+      setTimeout(() => setShowWalletForm(false), 1200);
+      fetchAll();
+    } catch (err) { setWalletState({ loading: false, error: err.message, success: null }); }
+  };
+
+  const handleCreateAddress = async () => {
+    if (!addressForm.address_line1 || !addressForm.city || !addressForm.pincode || !addressForm.floor_number) {
+      setAddressState({ loading: false, error: 'Floor, Address Line 1, City, and Pincode are required.', success: null }); return;
+    }
+    setAddressState({ loading: true, error: null, success: null });
+    try {
+      const payload = {
+        user_id: userId,
+        name: addressForm.name || 'Home',
+        address_line1: addressForm.address_line1,
+        address_line2: addressForm.address_line2,
+        floor_number: addressForm.floor_number,
+        landmark: addressForm.landmark,
+        city: addressForm.city,
+        state: addressForm.state,
+        pincode: addressForm.pincode,
+        delivery_instructions: addressForm.delivery_instructions,
+        latitude: addressForm.latitude ? parseFloat(addressForm.latitude) : null,
+        longitude: addressForm.longitude ? parseFloat(addressForm.longitude) : null,
+        is_default: data?.addresses?.length === 0, // make default if it's the first one
+      };
+
+      const res = await supabase.functions.invoke('admin-db-action', {
+        body: { action: 'insert', table: 'addresses', payload }
+      });
+      if (res.error) throw new Error(res.error.message || JSON.stringify(res.error));
+      if (res.data?.error) throw new Error(res.data.error);
+
+      setAddressState({ loading: false, error: null, success: 'Address created!' });
+      setAddressForm({ name: 'Home', address_line1: '', address_line2: '', floor_number: '', landmark: '', city: '', state: '', pincode: '', delivery_instructions: '', latitude: '', longitude: '' });
+      setTimeout(() => setShowAddressForm(false), 1500);
+      fetchAll();
+    } catch (err) { setAddressState({ loading: false, error: err.message, success: null }); }
+  };
 
   if (!userId) return null;
 
@@ -217,10 +371,46 @@ export function UserDetailDrawer({ userId, onClose }) {
                 <div style={{ fontSize: 28, fontWeight: 700, fontFamily: "'DM Mono',monospace", color: (w?.balance || 0) < 0 ? 'var(--red)' : 'var(--green)' }}>
                   {money(w?.balance)}
                 </div>
+                <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 6 }}>
+                  Reserved {money(w?.reserved_balance)} · Available {money((w?.balance || 0) - (w?.reserved_balance || 0))}
+                </div>
               </div>
+
+              {/* Adjust balance */}
+              <div style={{ marginBottom: 12 }}>
+                <button onClick={() => setShowWalletForm(!showWalletForm)} style={{ fontSize: 11, padding: '4px 10px', borderRadius: 4, background: 'var(--accent)', color: '#fff', border: 'none', cursor: 'pointer' }}>
+                  {showWalletForm ? 'Cancel' : '✎ Adjust Balance'}
+                </button>
+                {showWalletForm && (
+                  <div style={{ marginTop: 10, padding: 12, background: 'var(--bg)', borderRadius: 8, display: 'grid', gap: 8 }}>
+                    <label style={{ fontSize: 11, color: 'var(--text-3)' }}>New balance (₹)</label>
+                    <input type="number" min="0" step="0.01" value={walletForm.new_balance}
+                      onChange={(e) => setWalletForm(f => ({ ...f, new_balance: e.target.value }))}
+                      placeholder={`Current: ${money(w?.balance)}`}
+                      style={{ padding: '6px 8px', borderRadius: 4, border: '1px solid var(--border)', fontSize: 13 }} />
+                    <input type="text" value={walletForm.note}
+                      onChange={(e) => setWalletForm(f => ({ ...f, note: e.target.value }))}
+                      placeholder="Note (optional, shown in transaction)"
+                      style={{ padding: '6px 8px', borderRadius: 4, border: '1px solid var(--border)', fontSize: 13 }} />
+                    <label style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <input type="checkbox" checked={walletForm.create_txn}
+                        onChange={(e) => setWalletForm(f => ({ ...f, create_txn: e.target.checked }))} />
+                      Record as a transaction (credit/debit) in history
+                    </label>
+                    {walletState.error && <div style={{ fontSize: 11.5, color: 'var(--red)' }}>{walletState.error}</div>}
+                    {walletState.success && <div style={{ fontSize: 11.5, color: 'var(--green)' }}>{walletState.success}</div>}
+                    <button onClick={handleAdjustWallet} disabled={walletState.loading}
+                      style={{ fontSize: 12, padding: '6px 12px', borderRadius: 4, background: 'var(--green)', color: '#fff', border: 'none', cursor: 'pointer', justifySelf: 'start' }}>
+                      {walletState.loading ? 'Saving…' : 'Save Balance'}
+                    </button>
+                  </div>
+                )}
+              </div>
+
               {w ? (
                 <>
                   <Row label="Reserved Balance" value={money(w.reserved_balance)} />
+                  <Row label="Available Balance" value={money((w.balance || 0) - (w.reserved_balance || 0))} />
                   <Row label="Low Balance Threshold" value={money(w.low_balance_threshold)} />
                   <Row label="AutoPay Enabled" value={w.auto_recharge_enabled ? 'Yes' : 'No'} />
                   {w.auto_recharge_enabled && <>
@@ -256,6 +446,94 @@ export function UserDetailDrawer({ userId, onClose }) {
           {/* SUBSCRIPTIONS */}
           {tab === 'subscriptions' && (
             <div style={{ marginTop: 12 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                <SectionTitle count={data.subscriptions.length}>Subscriptions</SectionTitle>
+                <button onClick={() => setShowSubForm(!showSubForm)} style={{ fontSize: 11, padding: '4px 10px', borderRadius: 4, background: 'var(--accent)', color: '#fff', border: 'none', cursor: 'pointer' }}>
+                  {showSubForm ? 'Cancel' : '+ New Subscription'}
+                </button>
+              </div>
+
+              {showSubForm && (
+                <div style={{ background: 'var(--bg)', borderRadius: 8, padding: 14, marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <div style={{ display: 'flex', gap: 10 }}>
+                    <div className="form-group" style={{ flex: 1 }}>
+                      <label className="form-label">Product *</label>
+                      <select className="form-select" value={subForm.product_id} onChange={e => setSubForm(p => ({ ...p, product_id: e.target.value }))}>
+                        <option value="">— Select Product —</option>
+                        {products.map(p => <option key={p.id} value={p.id}>{p.name} (₹{p.price}/unit)</option>)}
+                      </select>
+                    </div>
+                    <div className="form-group" style={{ flex: 1 }}>
+                      <label className="form-label">Address *</label>
+                      <select className="form-select" value={subForm.address_id} onChange={e => setSubForm(p => ({ ...p, address_id: e.target.value }))}>
+                        <option value="">— Select Address —</option>
+                        {(data?.addresses || []).map(a => <option key={a.id} value={a.id}>{a.name} — {a.address_line1}, {a.city}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 10 }}>
+                    <div className="form-group" style={{ flex: 1 }}>
+                      <label className="form-label">Frequency</label>
+                      <select className="form-select" value={subForm.frequency} onChange={e => setSubForm(p => ({ ...p, frequency: e.target.value }))}>
+                        <option value="daily">Daily</option>
+                        <option value="on_interval">On Interval</option>
+                        <option value="custom">Custom</option>
+                      </select>
+                    </div>
+                    {subForm.frequency === 'on_interval' && (
+                      <div className="form-group" style={{ flex: 1 }}>
+                        <label className="form-label">Repeat Once In</label>
+                        <select className="form-select" value={subForm.interval_days} onChange={e => setSubForm(p => ({ ...p, interval_days: e.target.value }))}>
+                          <option value="2">2 Days</option>
+                          <option value="3">3 Days</option>
+                          <option value="4">4 Days</option>
+                        </select>
+                      </div>
+                    )}
+                    {subForm.frequency !== 'custom' && (
+                      <div className="form-group" style={{ flex: 1 }}>
+                        <label className="form-label">Quantity</label>
+                        <input type="number" min="1" className="form-input" value={subForm.quantity} onChange={e => setSubForm(p => ({ ...p, quantity: e.target.value }))} />
+                      </div>
+                    )}
+                    <div className="form-group" style={{ flex: 1 }}>
+                      <label className="form-label">Duration (months, blank = open)</label>
+                      <input type="number" min="1" className="form-input" value={subForm.duration_months} onChange={e => setSubForm(p => ({ ...p, duration_months: e.target.value }))} />
+                    </div>
+                  </div>
+
+                  {subForm.frequency === 'custom' && (
+                    <div className="form-group">
+                      <label className="form-label">Custom Quantities (Per Day)</label>
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                        {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day, idx) => (
+                          <div key={idx} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', background: 'var(--blue-bg)', padding: '6px 8px', borderRadius: 6, flex: 1, minWidth: 40 }}>
+                            <span style={{ fontSize: 10, color: 'var(--text-3)', marginBottom: 4, fontWeight: 600 }}>{day}</span>
+                            <input
+                              type="number" min="0" style={{ width: '100%', textAlign: 'center', padding: '4px', border: '1px solid var(--border)', borderRadius: 4, fontSize: 12 }}
+                              value={subForm.custom_quantities[String(idx)]}
+                              onChange={e => setSubForm(p => ({ ...p, custom_quantities: { ...p.custom_quantities, [String(idx)]: parseInt(e.target.value) || 0 } }))}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="form-group">
+                    <label className="form-label">Start Date *</label>
+                    <input type="date" className="form-input" style={{ maxWidth: 200 }} value={subForm.start_date} onChange={e => setSubForm(p => ({ ...p, start_date: e.target.value }))} />
+                  </div>
+                  {subState.error && <div style={{ padding: '8px 12px', background: 'var(--red-bg)', color: 'var(--red)', borderRadius: 6, fontSize: 12 }}>{subState.error}</div>}
+                  {subState.success && <div style={{ padding: '8px 12px', background: 'var(--green-bg)', color: 'var(--green)', borderRadius: 6, fontSize: 12 }}>✓ {subState.success}</div>}
+                  <button
+                    style={{ alignSelf: 'flex-start', padding: '8px 18px', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 6, cursor: subState.loading ? 'not-allowed' : 'pointer', fontSize: 13, fontWeight: 600, opacity: subState.loading ? 0.7 : 1 }}
+                    onClick={handleCreateSubscription} disabled={subState.loading}
+                  >
+                    {subState.loading ? 'Creating...' : 'Create Subscription'}
+                  </button>
+                </div>
+              )}
               <MiniTable
                 columns={['Product', 'Freq', 'Qty', 'Status', 'Start', 'End']}
                 rows={data.subscriptions}
@@ -277,6 +555,55 @@ export function UserDetailDrawer({ userId, onClose }) {
           {/* ORDERS */}
           {tab === 'orders' && (
             <div style={{ marginTop: 12 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                <SectionTitle>Orders</SectionTitle>
+                <button onClick={() => setShowOrderForm(!showOrderForm)} style={{ fontSize: 11, padding: '4px 10px', borderRadius: 4, background: 'var(--accent)', color: '#fff', border: 'none', cursor: 'pointer' }}>
+                  {showOrderForm ? 'Cancel' : '+ New Order'}
+                </button>
+              </div>
+
+              {showOrderForm && (
+                <div style={{ background: 'var(--bg)', borderRadius: 8, padding: 14, marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <div style={{ display: 'flex', gap: 10 }}>
+                    <div className="form-group" style={{ flex: 1 }}>
+                      <label className="form-label">Product *</label>
+                      <select className="form-select" value={orderForm.product_id} onChange={e => setOrderForm(p => ({ ...p, product_id: e.target.value }))}>
+                        <option value="">— Select Product —</option>
+                        {products.map(p => <option key={p.id} value={p.id}>{p.name} (₹{p.price})</option>)}
+                      </select>
+                    </div>
+                    <div className="form-group" style={{ flex: 1 }}>
+                      <label className="form-label">Address *</label>
+                      <select className="form-select" value={orderForm.address_id} onChange={e => setOrderForm(p => ({ ...p, address_id: e.target.value }))}>
+                        <option value="">— Select Address —</option>
+                        {(data?.addresses || []).map(a => <option key={a.id} value={a.id}>{a.name} — {a.address_line1}, {a.city}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 10 }}>
+                    <div className="form-group" style={{ flex: 1 }}>
+                      <label className="form-label">Delivery Date *</label>
+                      <input type="date" className="form-input" value={orderForm.delivery_date} onChange={e => setOrderForm(p => ({ ...p, delivery_date: e.target.value }))} />
+                    </div>
+                    <div className="form-group" style={{ flex: 1 }}>
+                      <label className="form-label">Quantity</label>
+                      <input type="number" min="1" className="form-input" value={orderForm.quantity} onChange={e => setOrderForm(p => ({ ...p, quantity: e.target.value }))} />
+                    </div>
+                    <div className="form-group" style={{ flex: 1 }}>
+                      <label className="form-label">Amount (₹)</label>
+                      <input type="number" min="0" className="form-input" value={orderForm.amount} onChange={e => setOrderForm(p => ({ ...p, amount: e.target.value }))} />
+                    </div>
+                  </div>
+                  {orderState.error && <div style={{ padding: '8px 12px', background: 'var(--red-bg)', color: 'var(--red)', borderRadius: 6, fontSize: 12 }}>{orderState.error}</div>}
+                  {orderState.success && <div style={{ padding: '8px 12px', background: 'var(--green-bg)', color: 'var(--green)', borderRadius: 6, fontSize: 12 }}>✓ {orderState.success}</div>}
+                  <button
+                    style={{ alignSelf: 'flex-start', padding: '8px 18px', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 6, cursor: orderState.loading ? 'not-allowed' : 'pointer', fontSize: 13, fontWeight: 600, opacity: orderState.loading ? 0.7 : 1 }}
+                    onClick={handleCreateOrder} disabled={orderState.loading}
+                  >
+                    {orderState.loading ? 'Creating...' : 'Create Order'}
+                  </button>
+                </div>
+              )}
               <MiniTable
                 columns={['Order', 'Date', 'Product', 'Qty', 'Amount', 'Status']}
                 rows={data.orders}
@@ -301,6 +628,71 @@ export function UserDetailDrawer({ userId, onClose }) {
           {/* ADDRESSES */}
           {tab === 'addresses' && (
             <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                <SectionTitle count={data.addresses.length}>Addresses</SectionTitle>
+                <button onClick={() => setShowAddressForm(!showAddressForm)} style={{ fontSize: 11, padding: '4px 10px', borderRadius: 4, background: 'var(--accent)', color: '#fff', border: 'none', cursor: 'pointer' }}>
+                  {showAddressForm ? 'Cancel' : '+ New Address'}
+                </button>
+              </div>
+
+              {showAddressForm && (
+                <div style={{ background: 'var(--bg)', borderRadius: 8, padding: 14, marginBottom: 8, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <div style={{ display: 'flex', gap: 10 }}>
+                    <div className="form-group" style={{ flex: 1 }}>
+                      <label className="form-label">Type (e.g., Home, Work)</label>
+                      <input className="form-input" value={addressForm.name} onChange={e => setAddressForm(p => ({ ...p, name: e.target.value }))} />
+                    </div>
+                    <div className="form-group" style={{ flex: 1 }}>
+                      <label className="form-label">City *</label>
+                      <input className="form-input" value={addressForm.city} onChange={e => setAddressForm(p => ({ ...p, city: e.target.value }))} />
+                    </div>
+                    <div className="form-group" style={{ flex: 1 }}>
+                      <label className="form-label">Pincode *</label>
+                      <input className="form-input" value={addressForm.pincode} onChange={e => setAddressForm(p => ({ ...p, pincode: e.target.value }))} />
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 10 }}>
+                    <div className="form-group" style={{ flex: 2 }}>
+                      <label className="form-label">Address Line 1 (House No, Building) *</label>
+                      <input className="form-input" value={addressForm.address_line1} onChange={e => setAddressForm(p => ({ ...p, address_line1: e.target.value }))} />
+                    </div>
+                    <div className="form-group" style={{ flex: 1 }}>
+                      <label className="form-label">Landmark</label>
+                      <input className="form-input" value={addressForm.landmark} onChange={e => setAddressForm(p => ({ ...p, landmark: e.target.value }))} />
+                    </div>
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Address Line 2 (Area, Street)</label>
+                    <input className="form-input" value={addressForm.address_line2} onChange={e => setAddressForm(p => ({ ...p, address_line2: e.target.value }))} />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Floor *</label>
+                    <input className="form-input" placeholder="e.g. Ground, 2nd Floor" value={addressForm.floor_number} onChange={e => setAddressForm(p => ({ ...p, floor_number: e.target.value }))} />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Delivery Instructions</label>
+                    <input className="form-input" placeholder="e.g. Leave at door, don't ring bell" value={addressForm.delivery_instructions} onChange={e => setAddressForm(p => ({ ...p, delivery_instructions: e.target.value }))} />
+                  </div>
+                  <div style={{ display: 'flex', gap: 10 }}>
+                    <div className="form-group" style={{ flex: 1 }}>
+                      <label className="form-label">Latitude (optional)</label>
+                      <input className="form-input" type="number" step="any" placeholder="e.g. 19.0760" value={addressForm.latitude} onChange={e => setAddressForm(p => ({ ...p, latitude: e.target.value }))} />
+                    </div>
+                    <div className="form-group" style={{ flex: 1 }}>
+                      <label className="form-label">Longitude (optional)</label>
+                      <input className="form-input" type="number" step="any" placeholder="e.g. 72.8777" value={addressForm.longitude} onChange={e => setAddressForm(p => ({ ...p, longitude: e.target.value }))} />
+                    </div>
+                  </div>
+                  {addressState.error && <div style={{ padding: '8px 12px', background: 'var(--red-bg)', color: 'var(--red)', borderRadius: 6, fontSize: 12 }}>{addressState.error}</div>}
+                  {addressState.success && <div style={{ padding: '8px 12px', background: 'var(--green-bg)', color: 'var(--green)', borderRadius: 6, fontSize: 12 }}>✓ {addressState.success}</div>}
+                  <button
+                    style={{ alignSelf: 'flex-start', padding: '8px 18px', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 6, cursor: addressState.loading ? 'not-allowed' : 'pointer', fontSize: 13, fontWeight: 600, opacity: addressState.loading ? 0.7 : 1 }}
+                    onClick={handleCreateAddress} disabled={addressState.loading}
+                  >
+                    {addressState.loading ? 'Creating...' : 'Create Address'}
+                  </button>
+                </div>
+              )}
               {data.addresses.length === 0 ? (
                 <div style={{ padding: 14, textAlign: 'center', color: 'var(--text-4)', fontSize: 12.5 }}>No addresses</div>
               ) : data.addresses.map(a => (
@@ -310,7 +702,7 @@ export function UserDetailDrawer({ userId, onClose }) {
                     {a.is_default && <span style={{ fontSize: 10.5, color: 'var(--green)', background: 'var(--green-bg)', padding: '1px 6px', borderRadius: 4 }}>Default</span>}
                   </div>
                   <div style={{ fontSize: 12, color: 'var(--text-3)' }}>
-                    {[a.address_line1, a.address_line2, a.landmark, a.city, a.state, a.pincode].filter(Boolean).join(', ')}
+                    {[a.address_line1, a.address_line2, a.floor_number && `Floor: ${a.floor_number}`, a.landmark, a.city, a.state, a.pincode].filter(Boolean).join(', ')}
                   </div>
                   {a.delivery_instructions && (
                     <div style={{ fontSize: 11.5, color: 'var(--text-4)', marginTop: 4 }}>📝 {a.delivery_instructions}</div>
@@ -404,6 +796,7 @@ export function UserDetailDrawer({ userId, onClose }) {
               </div>
             </div>
           )}
+
         </>
       )}
     </Drawer>

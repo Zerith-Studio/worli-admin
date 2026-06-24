@@ -15,6 +15,7 @@ const initialStats = {
   todayFailed: 0,
   todayPending: 0,
   todayRevenue: 0,
+  todayOrderValue: 0,
   atRiskCustomers: 0,
   pausedCustomers: 0,
   lowBalanceCount: 0,
@@ -63,6 +64,7 @@ export function useDashboardStats() {
       const todayFailed = todayOrders.filter(o => o.status === 'failed').length;
       const todayPending = todayOrders.filter(o => ['pending', 'in_transit', 'scheduled'].includes(o.status)).length;
       const todayRevenue = todayOrders.filter(o => o.status === 'delivered').reduce((s, o) => s + (o.amount || 0), 0);
+      const todayOrderValue = todayOrders.reduce((s, o) => s + (o.amount || 0), 0);
       const deliveryPct = todayOrders.length ? Math.round((todayDelivered / todayOrders.length) * 100) : 0;
 
       const lowBalanceCount = (walletData || []).filter(w => (w.balance || 0) < 0).length;
@@ -86,7 +88,7 @@ export function useDashboardStats() {
         totalCustomers: totalCustomers || 0,
         activeSubscriptions: activeSubscriptions || 0,
         todayOrders: todayOrders.length,
-        todayDelivered, todayFailed, todayPending, todayRevenue,
+        todayDelivered, todayFailed, todayPending, todayRevenue, todayOrderValue,
         atRiskCustomers, pausedCustomers: pausedCustomers || 0,
         lowBalanceCount, deliveryPct, zoneStats, weekData,
       });

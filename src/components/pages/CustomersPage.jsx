@@ -16,6 +16,7 @@ import { Modal } from '../ui/Modal';
 import { Button } from '../ui/Button';
 import { LoadingSpinner } from '../ui/LoadingSpinner';
 import { UserDetailDrawer } from '../ui/UserDetailDrawer';
+import { supabase } from '../../lib/supabase';
 
 const STATUSES = [
   { value: 'all', label: 'All Statuses' },
@@ -34,6 +35,45 @@ export function CustomersPage() {
   const [rechargeCustomer, setRechargeCustomer] = useState(null);
   const [rechargeState, setRechargeState] = useState({ loading: false, error: null, successMsg: null });
 
+  // Create customer state
+  const [createModal, setCreateModal] = useState(false);
+  const [createForm, setCreateForm] = useState({ full_name: '', phone: '', email: '' });
+  const [createState, setCreateState] = useState({ loading: false, error: null, success: null });
+
+  const handleCreateChange = (e) => setCreateForm(p => ({ ...p, [e.target.name]: e.target.value }));
+
+  const handleCreateSubmit = async () => {
+    if (!createForm.full_name.trim() || !createForm.phone.trim()) {
+      setCreateState({ loading: false, error: 'Full name and phone number are required.', success: null });
+      return;
+    }
+    if (createForm.full_name.trim().length < 2) {
+      setCreateState({ loading: false, error: 'Name must be at least 2 characters.', success: null });
+      return;
+    }
+    if (createForm.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(createForm.email.trim())) {
+      setCreateState({ loading: false, error: 'Please enter a valid email address.', success: null });
+      return;
+    }
+    setCreateState({ loading: true, error: null, success: null });
+    try {
+      const res = await supabase.functions.invoke('admin-create-user', {
+        body: {
+          full_name: createForm.full_name.trim(),
+          phone: createForm.phone.trim(),
+          email: createForm.email.trim() || undefined,
+        },
+      });
+      if (res.error) throw new Error(res.error.message || JSON.stringify(res.error));
+      if (res.data?.error) throw new Error(res.data.error);
+      setCreateState({ loading: false, error: null, success: `Customer "${createForm.full_name.trim()}" created successfully! They can now log in via OTP.` });
+      setCreateForm({ full_name: '', phone: '', email: '' });
+      setTimeout(() => { setCreateModal(false); setCreateState({ loading: false, error: null, success: null }); refresh(); }, 2500);
+    } catch (err) {
+      setCreateState({ loading: false, error: err.message, success: null });
+    }
+  };
+
   useDataRefresh(refresh, 60000, true);
 
   if (loading && customers.length === 0) {
@@ -46,9 +86,14 @@ export function CustomersPage() {
 
   return (
     <div>
-      <div className="page-header">
-        <div className="page-title">Customers</div>
-        <div className="page-sub">{totalCount} total customers</div>
+      <div className="page-header" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+        <div>
+          <div className="page-title">Customers</div>
+          <div className="page-sub">{totalCount} total customers</div>
+        </div>
+        <Button variant="primary" onClick={() => { setCreateModal(true); setCreateState({ loading: false, error: null, success: null }); }}>
+          + Create Customer
+        </Button>
       </div>
 
       <div className="search-filter">
@@ -133,6 +178,80 @@ export function CustomersPage() {
       {/* Unified customer sheet */}
       {viewUserId && (
         <UserDetailDrawer userId={viewUserId} onClose={() => setViewUserId(null)} />
+      )}
+
+      {/* Create Customer Modal */}
+      {createModal && (
+        <Modal
+          title="Create New Customer"
+          onClose={() => !createState.loading && setCreateModal(false)}
+          footer={
+            <>
+              <Button variant="secondary" onClick={() => setCreateModal(false)} disabled={createState.loading}>Cancel</Button>
+              <Button variant="primary" onClick={handleCreateSubmit} disabled={createState.loading}>
+                {createState.loading ? 'Creating...' : 'Create Customer'}
+              </Button>
+            </>
+          }
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ padding: '10px 14px', background: 'var(--blue-bg)', borderRadius: 7, fontSize: 12, color: 'var(--text-3)', marginBottom: 4 }}>
+              Mirrors the app signup process — phone number only (no password). The customer can log in via OTP immediately after creation.
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Full Name *</label>
+              <input
+                name="full_name"
+                className="form-input"
+                placeholder="e.g. Rahul Sharma"
+                value={createForm.full_name}
+                onChange={handleCreateChange}
+                autoFocus
+              />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Mobile Number * (10 digits, without +91)</label>
+              <input
+                name="phone"
+                className="form-input"
+                placeholder="e.g. 9876543210"
+                value={createForm.phone}
+                onChange={handleCreateChange}
+                maxLength={10}
+                inputMode="numeric"
+              />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Email Address (Optional)</label>
+              <input
+                name="email"
+                type="email"
+                className="form-input"
+                placeholder="e.g. rahul@gmail.com"
+                value={createForm.email}
+                onChange={handleCreateChange}
+              />
+            </div>
+
+            <div style={{ padding: '8px 12px', background: 'var(--bg)', borderRadius: 6, fontSize: 11.5, color: 'var(--text-4)' }}>
+              ℹ️ Address, subscriptions, and orders can be added after creation via the customer's detail drawer ("Create" tab).
+            </div>
+
+            {createState.error && (
+              <div style={{ padding: '10px 12px', background: 'var(--red-bg)', color: 'var(--red)', borderRadius: 6, fontSize: 13 }}>
+                ⚠️ {createState.error}
+              </div>
+            )}
+            {createState.success && (
+              <div style={{ padding: '10px 12px', background: 'var(--green-bg)', color: 'var(--green)', borderRadius: 6, fontSize: 13 }}>
+                ✓ {createState.success}
+              </div>
+            )}
+          </div>
+        </Modal>
       )}
 
       {/* Admin-only: manual auto-recharge */}

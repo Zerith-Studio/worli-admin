@@ -44,6 +44,7 @@ function getInitialForm() {
     images: [],          // array of already-uploaded URLs
     features: "",        // newline-separated for the textarea
     nutritional_info: "", // JSON string
+    product_type: "subscription",
     is_active: true,
   }
 }
@@ -98,9 +99,15 @@ export function ProductsPage() {
         description: product.description || "",
         volume: product.volume || "",
         price: String(product.price),
-        images: product.images || (product.image_url ? [product.image_url] : []),
+        // An empty images array is truthy, so fall back to the legacy
+        // image_url only when there are genuinely no images. Otherwise the
+        // existing image would silently drop on save.
+        images: (product.images && product.images.length > 0)
+          ? product.images
+          : (product.image_url ? [product.image_url] : []),
         features: (product.features || []).join("\n"),
         nutritional_info: JSON.stringify(product.nutritional_info || [], null, 2),
+        product_type: product.product_type || "subscription",
         is_active: product.is_active,
       })
     } else {
@@ -209,6 +216,7 @@ export function ProductsPage() {
           .map(f => f.trim())
           .filter(Boolean),
         nutritional_info: nutritionalArr,
+        product_type: form.product_type || "subscription",
         is_active: form.is_active,
       }
 
@@ -289,6 +297,9 @@ export function ProductsPage() {
               <div>
                 <div style={{ fontWeight: 600, fontSize: 15 }}>{product.name}</div>
                 {product.volume && <div style={{ color: "var(--text-3)", fontSize: 12 }}>{product.volume}</div>}
+                <Badge variant={product.product_type === "one_time" ? "info" : "neutral"} style={{ marginTop: 4, fontSize: 10 }}>
+                  {product.product_type === "one_time" ? "One-time" : "Subscription"}
+                </Badge>
               </div>
 
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -354,9 +365,18 @@ export function ProductsPage() {
             </div>
 
             {/* Price only — deposit_amount removed */}
-            <div className="form-group">
-              <label className="form-label">Price (₹) *</label>
-              <input name="price" type="number" step="0.01" className="form-input" value={form.price} onChange={handleChange} />
+            <div style={{ display: "flex", gap: 12 }}>
+              <div className="form-group" style={{ flex: 1 }}>
+                <label className="form-label">Price (₹) *</label>
+                <input name="price" type="number" step="0.01" className="form-input" value={form.price} onChange={handleChange} />
+              </div>
+              <div className="form-group" style={{ flex: 1 }}>
+                <label className="form-label">Product Type</label>
+                <select name="product_type" className="form-input" value={form.product_type} onChange={handleChange}>
+                  <option value="subscription">Subscription</option>
+                  <option value="one_time">One-time / Direct buy</option>
+                </select>
+              </div>
             </div>
 
             {/* Description */}

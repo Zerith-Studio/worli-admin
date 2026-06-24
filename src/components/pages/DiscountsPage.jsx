@@ -8,6 +8,7 @@ import { Modal } from "../ui/Modal"
 export function DiscountsPage() {
   const [loading, setLoading] = useState(true)
   const [discounts, setDiscounts] = useState([])
+  const [products, setProducts] = useState([])
   const [error, setError] = useState(null)
   
   const [isModalOpen, setIsModalOpen] = useState(false)
@@ -24,6 +25,7 @@ export function DiscountsPage() {
       max_discount_amount: "",
       min_order_amount: "0",
       applicable_to: "all",
+      product_id: "",
       max_uses: "",
       max_uses_per_user: "1",
       is_first_order_only: false,
@@ -34,7 +36,17 @@ export function DiscountsPage() {
 
   useEffect(() => {
     fetchDiscounts()
+    fetchProducts()
   }, [])
+
+  const fetchProducts = async () => {
+    const { data } = await supabase
+      .from("products")
+      .select("id,name")
+      .eq("is_active", true)
+      .order("name")
+    setProducts(data || [])
+  }
 
   const fetchDiscounts = async () => {
     setLoading(true)
@@ -64,6 +76,7 @@ export function DiscountsPage() {
         max_discount_amount: discount.max_discount_amount || "",
         min_order_amount: discount.min_order_amount || "0",
         applicable_to: discount.applicable_to || "all",
+        product_id: discount.product_id || "",
         max_uses: discount.max_uses || "",
         max_uses_per_user: discount.max_uses_per_user || "1",
         is_first_order_only: discount.is_first_order_only || false,
@@ -101,6 +114,7 @@ export function DiscountsPage() {
         max_discount_amount: formData.max_discount_amount ? parseFloat(formData.max_discount_amount) : null,
         min_order_amount: parseFloat(formData.min_order_amount || 0),
         applicable_to: formData.applicable_to,
+        product_id: formData.product_id || null,
         max_uses: formData.max_uses ? parseInt(formData.max_uses) : null,
         max_uses_per_user: parseInt(formData.max_uses_per_user || 1),
         is_first_order_only: formData.is_first_order_only,
@@ -264,6 +278,18 @@ export function DiscountsPage() {
                 <option value="one_time">One Time</option>
                 <option value="wallet_recharge">Wallet Recharge</option>
               </select>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Product (optional)</label>
+              <select name="product_id" className="form-input" value={formData.product_id} onChange={handleChange}>
+                <option value="">All products</option>
+                {products.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+              <div style={{ fontSize: 11, color: "var(--text-3)", marginTop: 4 }}>
+                Leave empty to apply to all products. Selecting a product scopes this code to that one product only.
+              </div>
             </div>
             <div style={{ display: "flex", gap: 10 }}>
               <div className="form-group" style={{ flex: 1 }}>

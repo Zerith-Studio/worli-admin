@@ -21,6 +21,7 @@ export function FreeSamplePage() {
       product_id: "",
       quantity_per_day: "1",
       trial_days: "3",
+      max_bottles: "0",
       delivery_time: "07:00 AM",
       description: ""
     }
@@ -67,6 +68,7 @@ export function FreeSamplePage() {
         product_id: config.product_id || "",
         quantity_per_day: String(config.quantity_per_day || 1),
         trial_days: String(config.trial_days || 3),
+        max_bottles: String(config.max_bottles ?? 0),
         delivery_time: config.delivery_time || "",
         description: config.description || ""
       })
@@ -96,6 +98,7 @@ export function FreeSamplePage() {
         product_id: formData.product_id || null,
         quantity_per_day: parseInt(formData.quantity_per_day),
         trial_days: parseInt(formData.trial_days),
+        max_bottles: parseInt(formData.max_bottles) || 0,
         delivery_time: formData.delivery_time,
         description: formData.description
       }
@@ -182,6 +185,13 @@ export function FreeSamplePage() {
             </div>
 
             <div>
+              <div style={{ fontSize: "12px", fontWeight: "bold", color: "var(--text-3)", textTransform: "uppercase", marginBottom: "8px" }}>Max Bottles (Total Cap)</div>
+              <div style={{ fontSize: "18px", fontWeight: "bold", color: "var(--text-1)" }}>
+                {config.max_bottles > 0 ? config.max_bottles : <span style={{ color: 'var(--text-3)', fontSize: 13 }}>No cap</span>}
+              </div>
+            </div>
+
+            <div>
               <div style={{ fontSize: "12px", fontWeight: "bold", color: "var(--text-3)", textTransform: "uppercase", marginBottom: "8px" }}>Delivery Time</div>
               <div style={{ fontSize: "14px", color: "var(--text-2)" }}>{config.delivery_time || "N/A"}</div>
             </div>
@@ -226,11 +236,15 @@ export function FreeSamplePage() {
             <div style={{ display: "flex", gap: 10 }}>
               <div className="form-group" style={{ flex: 1 }}>
                 <label className="form-label">Quantity Per Day</label>
-                <input name="quantity_per_day" type="number" className="form-input" value={formData.quantity_per_day} onChange={handleChange} />
+                <input name="quantity_per_day" type="number" min="1" className="form-input" value={formData.quantity_per_day} onChange={handleChange} />
               </div>
               <div className="form-group" style={{ flex: 1 }}>
                 <label className="form-label">Trial Duration (Days)</label>
-                <input name="trial_days" type="number" className="form-input" value={formData.trial_days} onChange={handleChange} />
+                <input name="trial_days" type="number" min="1" className="form-input" value={formData.trial_days} onChange={handleChange} />
+              </div>
+              <div className="form-group" style={{ flex: 1 }}>
+                <label className="form-label">Max Bottles Total <span style={{ color: 'var(--text-3)', fontWeight: 400 }}>(0 = no cap)</span></label>
+                <input name="max_bottles" type="number" min="0" className="form-input" value={formData.max_bottles} onChange={handleChange} />
               </div>
             </div>
             

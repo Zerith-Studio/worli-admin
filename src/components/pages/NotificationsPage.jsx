@@ -3,11 +3,40 @@
 // Admin Dashboard — Rich Push Notification Composer & History
 // ============================================================
 
-import React, { useState, useEffect, useCallback } from "react"
+import React, { useState, useEffect, useCallback, useRef } from "react"
 import { supabase } from "../../lib/supabase"
 import { Button } from "../ui/Button"
 import { Modal } from "../ui/Modal"
 import { Drawer } from "../ui/Drawer"
+
+// ─── Image upload (mirrors ProductsPage pattern) ──────────────
+const NOTIF_BUCKET = "notification-images"
+
+async function uploadNotificationImage(file) {
+  const ext = file.name.split(".").pop()
+  const path = `notifications/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+  const { error } = await supabase.storage.from(NOTIF_BUCKET).upload(path, file, {
+    cacheControl: "3600",
+    upsert: false,
+  })
+  if (error) throw error
+  const { data } = supabase.storage.from(NOTIF_BUCKET).getPublicUrl(path)
+  return data.publicUrl
+}
+
+// ─── Deep-link screen targets ─────────────────────────────────
+// Static screens + two dynamic ones (product, order) that need params.
+const SCREEN_OPTIONS = [
+  { key: "home", label: "Home" },
+  { key: "wallet", label: "Wallet" },
+  { key: "orders", label: "Orders" },
+  { key: "subscriptions", label: "Subscriptions" },
+  { key: "account", label: "Account" },
+  { key: "refer", label: "Refer" },
+  { key: "free_sample", label: "Free Sample" },
+  { key: "product", label: "Product (pick a product)" },
+  { key: "order", label: "Order (enter order id)" },
+]
 
 // ─── Notification type badge colors ──────────────────────────
 const TYPE_COLORS = {
@@ -264,7 +293,9 @@ export function NotificationsPage() {
     title: "",
     body: "",
     image_url: "",
-    deep_link: "",
+    screen: "",            // deep-link target screen key (empty = none)
+    productId: "",         // when screen === "product"
+    orderId: "",           // when screen === "order"
     notification_type: "general",
     channel: "default",
     target: "all",         // "all" | "specific"
@@ -273,6 +304,39 @@ export function NotificationsPage() {
   const [form, setForm] = useState(defaultForm)
 
   const updateForm = (patch) => setForm((prev) => ({ ...prev, ...patch }))
+
+  // Products for the "Product" deep-link target
+  const [products, setProducts] = useState([])
+  const [uploadingImage, setUploadingImage] = useState(false)
+  const [uploadError, setUploadError] = useState(null)
+  const fileInputRef = useRef(null)
+
+  useEffect(() => {
+    supabase
+      .from("products")
+      .select("id,name")
+      .eq("is_active", true)
+      .order("name")
+      .then(({ data }) => setProducts(data || []))
+  }, [])
+
+  // ── Image upload handler ────────────────────────────────────
+  const handleImageUpload = async (e) => {
+    const file = e.target.files?.[0]
+    if (file) {
+      setUploadError(null)
+      setUploadingImage(true)
+      try {
+        const url = await uploadNotificationImage(file)
+        updateForm({ image_url: url })
+      } catch (err) {
+        setUploadError(err.message)
+      } finally {
+        setUploadingImage(false)
+      }
+    }
+    if (fileInputRef.current) fileInputRef.current.value = ""
+  }
 
   // ── Fetch sent history ──────────────────────────────────────
   const fetchHistory = async () => {
@@ -302,11 +366,23 @@ export function NotificationsPage() {
     setSending(true)
     setSendResult(null)
 
+    // Build structured deep-link payload from the selected screen.
+    let deepLink
+    let dataPayload
+    if (form.screen) {
+      const params = {}
+      if (form.screen === "product" && form.productId) params.productId = form.productId
+      if (form.screen === "order" && form.orderId) params.orderId = form.orderId
+      deepLink = `worli://${form.screen}`
+      dataPayload = { screen: form.screen, params }
+    }
+
     const body = {
       title: form.title,
       message: form.body,
       image_url: form.image_url || undefined,
-      deep_link: form.deep_link || undefined,
+      deep_link: deepLink,
+      data: dataPayload,
       notification_type: form.notification_type,
       channel: form.channel,
       user_ids: form.target === "specific" ? form.selectedUsers.map((u) => u.id) : undefined,
@@ -527,26 +603,79 @@ export function NotificationsPage() {
                 <div style={{ fontSize: 11, color: "var(--text-3)", marginTop: 3 }}>{form.body.length}/300</div>
               </div>
 
-              {/* Image URL */}
+              {/* Image URL + upload */}
               <div className="form-group">
                 <label className="form-label">Image URL <span style={{ color: "var(--text-3)", fontWeight: 400 }}>(optional — for rich notification)</span></label>
-                <input
-                  className="form-input"
-                  value={form.image_url}
-                  onChange={(e) => updateForm({ image_url: e.target.value })}
-                  placeholder="https://..."
-                />
+                <div style={{ display: "flex", gap: 8 }}>
+                  <input
+                    className="form-input"
+                    style={{ flex: 1 }}
+                    value={form.image_url}
+                    onChange={(e) => updateForm({ image_url: e.target.value })}
+                    placeholder="https://..."
+                  />
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    style={{ display: "none" }}
+                    onChange={handleImageUpload}
+                  />
+                  <Button
+                    variant="secondary"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploadingImage}
+                  >
+                    {uploadingImage ? "Uploading…" : "📷 Upload"}
+                  </Button>
+                </div>
+                {uploadError && (
+                  <div style={{ fontSize: 11, color: "var(--red)", marginTop: 4 }}>{uploadError}</div>
+                )}
+                <div style={{ fontSize: 11, color: "var(--text-3)", marginTop: 4 }}>
+                  Uploads to Supabase Storage (notification-images bucket).
+                </div>
               </div>
 
-              {/* Deep link */}
+              {/* Deep link / screen selector */}
               <div className="form-group">
-                <label className="form-label">Deep Link / Screen <span style={{ color: "var(--text-3)", fontWeight: 400 }}>(optional)</span></label>
-                <input
+                <label className="form-label">Screen / Deep Link <span style={{ color: "var(--text-3)", fontWeight: 400 }}>(optional)</span></label>
+                <select
                   className="form-input"
-                  value={form.deep_link}
-                  onChange={(e) => updateForm({ deep_link: e.target.value })}
-                  placeholder="worli-dairy://wallet  or  /product"
-                />
+                  value={form.screen}
+                  onChange={(e) => updateForm({ screen: e.target.value, productId: "", orderId: "" })}
+                >
+                  <option value="">— None —</option>
+                  {SCREEN_OPTIONS.map((s) => (
+                    <option key={s.key} value={s.key}>{s.label}</option>
+                  ))}
+                </select>
+
+                {/* Dynamic: Product picker */}
+                {form.screen === "product" && (
+                  <select
+                    className="form-input"
+                    style={{ marginTop: 8 }}
+                    value={form.productId}
+                    onChange={(e) => updateForm({ productId: e.target.value })}
+                  >
+                    <option value="">— Select product —</option>
+                    {products.map((p) => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                )}
+
+                {/* Dynamic: Order id input */}
+                {form.screen === "order" && (
+                  <input
+                    className="form-input"
+                    style={{ marginTop: 8 }}
+                    value={form.orderId}
+                    onChange={(e) => updateForm({ orderId: e.target.value })}
+                    placeholder="Order id / number"
+                  />
+                )}
               </div>
 
               {/* Type + Channel */}

@@ -65,7 +65,7 @@ export function AddressesPage() {
       let query = supabase
         .from("addresses")
         .select(
-          `id, name, address_line1, address_line2, landmark, city, state, pincode,
+          `id, name, address_line1, address_line2, landmark, floor_number, city, state, pincode,
            is_default, delivery_instructions, created_at,
            user_id,
            users!inner(full_name, phone_number),
@@ -258,6 +258,7 @@ export function AddressesPage() {
                         <td>
                           <div style={{ fontSize: 13 }}>{addr.address_line1}</div>
                           {addr.address_line2 && <div style={{ fontSize: 11, color: "var(--text-3)" }}>{addr.address_line2}</div>}
+                          {addr.floor_number && <div style={{ fontSize: 11, color: "var(--text-3)" }}>Floor: {addr.floor_number}</div>}
                           {addr.landmark && <div style={{ fontSize: 11, color: "var(--text-3)" }}>Near: {addr.landmark}</div>}
                         </td>
                         <td>
@@ -313,6 +314,7 @@ export function AddressesPage() {
             <div style={{ fontSize: 11.5, color: "var(--text-3)", marginBottom: 4 }}>
               {assignTarget.name ? <strong>{assignTarget.name}</strong> : null}
               {assignTarget.name ? ' · ' : ''}{assignTarget.address_line1}{assignTarget.city ? `, ${assignTarget.city}` : ""}
+              {assignTarget.floor_number ? ` · Floor: ${assignTarget.floor_number}` : ""}
             </div>
             {assignTarget.delivery_instructions && (
               <div style={{ fontSize: 11, color: 'var(--yellow)', background: 'var(--yellow-bg)', borderRadius: 5, padding: '5px 10px', marginBottom: 10 }}>
