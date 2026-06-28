@@ -32,6 +32,8 @@ export function DriversPage() {
   // Cascaded hub→route selectors for route assignment
   const [assignHubId, setAssignHubId] = useState('');
   const [assignRouteId, setAssignRouteId] = useState('');
+  // 'permanent' = standing assignment; 'override' = just today.
+  const [assignMode, setAssignMode] = useState('permanent');
 
   // Batch rider-order assignment
   const [assigning, setAssigning] = useState(false);
@@ -62,6 +64,7 @@ export function DriversPage() {
     setSaveMsg('');
     setAssignHubId('');
     setAssignRouteId('');
+    setAssignMode('permanent');
   };
 
   const handleSaveProfile = async () => {
@@ -94,27 +97,41 @@ export function DriversPage() {
 
   const handleAssignRoute = async () => {
     if (!assignRouteId) return;
-    const result = await assignRoute(selectedDriver.id, assignRouteId);
+    const permanent = assignMode === 'permanent';
+    const result = await assignRoute(selectedDriver.id, assignRouteId, { permanent });
     if (result.success) {
       const route = routes.find(r => r.id === assignRouteId);
       const hub = hubs.find(h => h.id === assignHubId);
       setSelectedDriver(prev => ({
         ...prev,
         assignedRoutes: [
-          ...(prev.assignedRoutes || []),
-          { routeId: assignRouteId, routeName: route?.name || '—', hubName: hub?.name || '—' },
+          // Drop any existing entry of the same kind for this route, then add.
+          ...(prev.assignedRoutes || []).filter(
+            r => !(r.routeId === assignRouteId && r.isPermanent === permanent)
+          ),
+          {
+            routeId: assignRouteId,
+            routeName: route?.name || '—',
+            hubName: hub?.name || '—',
+            isPermanent: permanent,
+            isOverride: !permanent,
+          },
         ],
       }));
       setAssignHubId('');
       setAssignRouteId('');
+    } else {
+      setAssignMsg({ ok: false, text: `Error: ${result.error}` });
     }
   };
 
-  const handleRemoveRoute = async (routeId) => {
-    await removeRoute(selectedDriver.id, routeId);
+  const handleRemoveRoute = async (route) => {
+    await removeRoute(selectedDriver.id, route.routeId, { permanent: route.isPermanent });
     setSelectedDriver(prev => ({
       ...prev,
-      assignedRoutes: prev.assignedRoutes.filter(r => r.routeId !== routeId),
+      assignedRoutes: (prev.assignedRoutes || []).filter(
+        r => !(r.routeId === route.routeId && r.isPermanent === route.isPermanent)
+      ),
     }));
   };
 
@@ -126,12 +143,17 @@ export function DriversPage() {
     return <div className="card" style={{ margin: '20px', padding: '20px', color: 'var(--red)' }}>Error: {error}</div>;
   }
 
-  // Routes already assigned today by this driver
-  const assignedRouteIds = new Set(selectedDriver?.assignedRoutes?.map(r => r.routeId) || []);
+  // Routes this driver already owns permanently (for hiding from permanent picker)
+  const permanentRouteIds = new Set(
+    (selectedDriver?.assignedRoutes || []).filter(r => r.isPermanent).map(r => r.routeId)
+  );
 
-  // Routes filtered by the selected hub that aren't yet assigned
+  // Routes filtered by the selected hub. For permanent assignment, hide routes
+  // this driver already owns permanently. For overrides, allow any route in the
+  // hub (an override can take a route over from its permanent owner).
   const filteredRoutes = routes.filter(r =>
-    r.hub_id === assignHubId && !assignedRouteIds.has(r.id)
+    r.hub_id === assignHubId &&
+    (assignMode === 'override' || !permanentRouteIds.has(r.id))
   );
 
   return (
@@ -312,27 +334,63 @@ export function DriversPage() {
           )}
 
           {/* Route assignment tab — hub → route cascade */}
-          {tab === 'routes' && (
+          {tab === 'routes' && (() => {
+            const permanentRoutes = (selectedDriver.assignedRoutes || []).filter(r => r.isPermanent);
+            const overrideRoutes = (selectedDriver.assignedRoutes || []).filter(r => r.isOverride);
+            const RouteRow = (r) => (
+              <div key={`${r.routeId}-${r.isPermanent}`} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--bg)', padding: '8px 12px', borderRadius: 6 }}>
+                <div>
+                  <span style={{ fontSize: 13, fontWeight: 500 }}>🗺 {r.routeName}</span>
+                  <span style={{ fontSize: 11, color: 'var(--text-3)', marginLeft: 6 }}>({r.hubName})</span>
+                </div>
+                <Button size="sm" style={{ color: 'var(--red)' }} onClick={() => handleRemoveRoute(r)}>Remove</Button>
+              </div>
+            );
+            return (
             <div>
-              <div style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 10 }}>Today's assigned routes:</div>
-              {(selectedDriver.assignedRoutes || []).length === 0 ? (
-                <div style={{ fontSize: 12, color: 'var(--text-4)', marginBottom: 12 }}>No routes assigned today.</div>
+              {/* Permanent (standing) routes */}
+              <div style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 10 }}>Permanent routes:</div>
+              {permanentRoutes.length === 0 ? (
+                <div style={{ fontSize: 12, color: 'var(--text-4)', marginBottom: 12 }}>No permanent routes.</div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 14 }}>
-                  {selectedDriver.assignedRoutes.map(r => (
-                    <div key={r.routeId} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--bg)', padding: '8px 12px', borderRadius: 6 }}>
-                      <div>
-                        <span style={{ fontSize: 13, fontWeight: 500 }}>🗺 {r.routeName}</span>
-                        <span style={{ fontSize: 11, color: 'var(--text-3)', marginLeft: 6 }}>({r.hubName})</span>
-                      </div>
-                      <Button size="sm" style={{ color: 'var(--red)' }} onClick={() => handleRemoveRoute(r.routeId)}>Remove</Button>
-                    </div>
-                  ))}
+                  {permanentRoutes.map(RouteRow)}
                 </div>
               )}
 
-              {/* Cascaded assignment: pick hub → then route */}
+              {/* Today-only overrides */}
+              <div style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 10 }}>Today's override routes:</div>
+              {overrideRoutes.length === 0 ? (
+                <div style={{ fontSize: 12, color: 'var(--text-4)', marginBottom: 12 }}>No overrides today.</div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 14 }}>
+                  {overrideRoutes.map(RouteRow)}
+                </div>
+              )}
+
+              {/* Cascaded assignment: pick mode → hub → route */}
               <div style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 8, marginTop: 4 }}>Assign a route:</div>
+
+              {/* Step 0: Permanent vs Today-only */}
+              <div className="form-group">
+                <label className="form-label" style={{ fontSize: 11 }}>Assignment type</label>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <Button
+                    size="sm"
+                    variant={assignMode === 'permanent' ? 'primary' : 'secondary'}
+                    onClick={() => { setAssignMode('permanent'); setAssignRouteId(''); }}
+                  >
+                    Permanent
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant={assignMode === 'override' ? 'primary' : 'secondary'}
+                    onClick={() => { setAssignMode('override'); setAssignRouteId(''); }}
+                  >
+                    Today only
+                  </Button>
+                </div>
+              </div>
 
               {/* Step 1: Hub */}
               <div className="form-group">
@@ -350,7 +408,7 @@ export function DriversPage() {
                   <label className="form-label" style={{ fontSize: 11 }}>2. Select Route</label>
                   {filteredRoutes.length === 0 ? (
                     <div style={{ fontSize: 12, color: 'var(--text-3)', padding: '8px 0' }}>
-                      No unassigned routes for this hub.
+                      {assignMode === 'permanent' ? 'No available routes for this hub.' : 'No routes for this hub.'}
                     </div>
                   ) : (
                     <select className="form-select" value={assignRouteId}
@@ -364,11 +422,12 @@ export function DriversPage() {
 
               {assignRouteId && (
                 <Button variant="primary" onClick={handleAssignRoute} style={{ width: '100%', marginTop: 4 }}>
-                  Assign Route
+                  {assignMode === 'permanent' ? 'Assign Permanent Route' : "Assign for Today"}
                 </Button>
               )}
             </div>
-          )}
+            );
+          })()}
         </Drawer>
       )}
     </div>

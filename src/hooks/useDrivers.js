@@ -70,13 +70,14 @@ export function useDrivers() {
         else if (o.status === 'failed') statsMap[o.rider_id].failed++;
       });
 
-      // Fetch today's route assignments per rider (with hub info via join)
+      // Fetch route assignments per rider: permanent (assigned_date IS NULL)
+      // plus today's one-day overrides. Each is tagged so the UI can split them.
       const today = new Date().toISOString().split('T')[0];
       const { data: routeAssignments } = await supabase
         .from('rider_routes')
-        .select('rider_id, route_id, routes(name, hub_id, hubs(name))')
+        .select('rider_id, route_id, assigned_date, routes(name, hub_id, hubs(name))')
         .in('rider_id', riderIds)
-        .eq('assigned_date', today);
+        .or(`assigned_date.is.null,assigned_date.eq.${today}`);
       const assignmentMap = {};
       routeAssignments?.forEach(ra => {
         if (!assignmentMap[ra.rider_id]) assignmentMap[ra.rider_id] = [];
@@ -84,6 +85,8 @@ export function useDrivers() {
           routeId: ra.route_id,
           routeName: ra.routes?.name || '—',
           hubName: ra.routes?.hubs?.name || '—',
+          isPermanent: ra.assigned_date === null,
+          isOverride: ra.assigned_date !== null,
         });
       });
 
@@ -197,13 +200,24 @@ export function useDrivers() {
     }
   }, []);
 
-  const assignRoute = useCallback(async (riderId, routeId) => {
+  // Assign a route to a rider. Permanent by default; pass { permanent: false }
+  // for a one-day override (which also re-stamps that day's orders immediately).
+  const assignRoute = useCallback(async (riderId, routeId, opts = {}) => {
+    const { permanent = true, date } = opts;
     try {
-      const today = new Date().toISOString().split('T')[0];
-      const { error } = await supabase.from('rider_routes').insert({
-        rider_id: riderId, route_id: routeId, assigned_date: today,
-      });
-      if (error) throw error;
+      if (permanent) {
+        const { error } = await supabase.rpc('set_permanent_route', {
+          p_route_id: routeId, p_rider_id: riderId,
+        });
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.rpc('set_route_override', {
+          p_route_id: routeId,
+          p_rider_id: riderId,
+          p_date: date || new Date().toISOString().split('T')[0],
+        });
+        if (error) throw error;
+      }
       await fetchDrivers();
       return { success: true };
     } catch (err) {
@@ -211,15 +225,21 @@ export function useDrivers() {
     }
   }, [fetchDrivers]);
 
-  const removeRoute = useCallback(async (riderId, routeId) => {
+  // Remove a route from a rider. Permanent by default; pass { permanent: false }
+  // to clear a one-day override (reverting that day to the permanent rider).
+  const removeRoute = useCallback(async (riderId, routeId, opts = {}) => {
+    const { permanent = true, date } = opts;
     try {
-      const today = new Date().toISOString().split('T')[0];
-      const { error } = await supabase.from('rider_routes')
-        .delete()
-        .eq('rider_id', riderId)
-        .eq('route_id', routeId)
-        .eq('assigned_date', today);
-      if (error) throw error;
+      if (permanent) {
+        const { error } = await supabase.rpc('remove_permanent_route', { p_route_id: routeId });
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.rpc('remove_route_override', {
+          p_route_id: routeId,
+          p_date: date || new Date().toISOString().split('T')[0],
+        });
+        if (error) throw error;
+      }
       await fetchDrivers();
       return { success: true };
     } catch (err) {

@@ -9,6 +9,25 @@ import { Button } from "../ui/Button"
 import { Modal } from "../ui/Modal"
 import { Drawer } from "../ui/Drawer"
 
+// ─── Pull the real error out of a failed functions.invoke ─────
+// On a non-2xx response supabase-js sets `error` (FunctionsHttpError) and the
+// actual body lives on error.context (a Response). Without this you only ever
+// see the generic "Edge Function returned a non-2xx status code".
+async function extractInvokeError(error, data) {
+  if (data?.error) return data.error
+  if (error?.context && typeof error.context.json === "function") {
+    try {
+      const body = await error.context.clone().json()
+      if (body?.error) return body.error
+    } catch { /* fall through to text */ }
+    try {
+      const text = await error.context.text()
+      if (text) return text
+    } catch { /* ignore */ }
+  }
+  return error?.message || "Unknown error"
+}
+
 // ─── Image upload (mirrors ProductsPage pattern) ──────────────
 const NOTIF_BUCKET = "notification-images"
 
@@ -147,7 +166,8 @@ function UserSearch({ selectedUsers, onSelectionChange }) {
                 style={{
                   padding: "8px 12px",
                   cursor: hasToken ? "pointer" : "not-allowed",
-                  background: selected ? "rgba(16,27,83,0.07)" : "white",
+                  background: selected ? "var(--accent-light)" : "white",
+                  borderLeft: selected ? "3px solid var(--accent)" : "3px solid transparent",
                   borderBottom: "1px solid var(--border)",
                   display: "flex",
                   alignItems: "center",
@@ -172,8 +192,9 @@ function UserSearch({ selectedUsers, onSelectionChange }) {
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
           {selectedUsers.map((u) => (
             <div key={u.id} style={{
-              background: "var(--bg-accent)",
-              border: "1px solid var(--border)",
+              background: "var(--accent-light)",
+              color: "var(--accent)",
+              border: "1px solid var(--accent)",
               borderRadius: 20,
               padding: "3px 10px",
               fontSize: 12,
@@ -232,7 +253,7 @@ function NotificationDetailDrawer({ notif, onClose }) {
         <Row label="Title">{notif.title}</Row>
         <Row label="Body">{notif.body}</Row>
         <Row label="Image URL">{notif.image_url
-          ? <a href={notif.image_url} target="_blank" rel="noreferrer" style={{ color: "var(--primary)" }}>{notif.image_url}</a>
+          ? <a href={notif.image_url} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>{notif.image_url}</a>
           : "—"}</Row>
         <Row label="Target Type">{TARGET_LABELS[notif.target_type] ?? notif.target_type}</Row>
         <Row label="Status">{notif.status}</Row>
@@ -392,7 +413,7 @@ export function NotificationsPage() {
 
     setSending(false)
     if (error || !data?.success) {
-      setSendResult({ ok: false, msg: data?.error ?? error?.message ?? "Unknown error" })
+      setSendResult({ ok: false, msg: await extractInvokeError(error, data) })
     } else {
       setSendResult({ ok: true, sent: data.sent, failed: data.failed })
       setIsModalOpen(false)
@@ -408,7 +429,7 @@ export function NotificationsPage() {
     const { data, error } = await supabase.functions.invoke("notify-low-bottles", { body: {} })
     setSending(false)
     if (error || !data?.success) {
-      alert("Error: " + (data?.error ?? error?.message))
+      alert("Error: " + (await extractInvokeError(error, data)))
     } else {
       alert(`✅ Notified ${data.notified} users (${data.failed ?? 0} failed)`)
       fetchHistory()
@@ -543,25 +564,30 @@ export function NotificationsPage() {
               <div className="form-group">
                 <label className="form-label">Target Audience</label>
                 <div style={{ display: "flex", gap: 8 }}>
-                  {["all", "specific"].map((t) => (
-                    <button
-                      key={t}
-                      onClick={() => updateForm({ target: t, selectedUsers: [] })}
-                      style={{
-                        padding: "6px 16px",
-                        borderRadius: 20,
-                        border: "2px solid",
-                        borderColor: form.target === t ? "var(--primary)" : "var(--border)",
-                        background: form.target === t ? "var(--primary)" : "transparent",
-                        color: form.target === t ? "white" : "var(--text-2)",
-                        cursor: "pointer",
-                        fontWeight: 600,
-                        fontSize: 13,
-                      }}
-                    >
-                      {t === "all" ? "📢 All Users" : "👤 Specific Users"}
-                    </button>
-                  ))}
+                  {["all", "specific"].map((t) => {
+                    const active = form.target === t
+                    return (
+                      <button
+                        key={t}
+                        onClick={() => updateForm({ target: t, selectedUsers: [] })}
+                        style={{
+                          padding: "8px 16px",
+                          borderRadius: 20,
+                          // Selected = highlighted colored border + subtle tint + readable
+                          // primary-colored text. Unselected = muted border, plain text.
+                          border: active ? "2px solid var(--accent)" : "2px solid var(--border)",
+                          background: active ? "var(--accent-light)" : "transparent",
+                          color: active ? "var(--accent)" : "var(--text-2)",
+                          cursor: "pointer",
+                          fontWeight: active ? 700 : 500,
+                          fontSize: 13,
+                          transition: "border-color .15s, background .15s, color .15s",
+                        }}
+                      >
+                        {active ? "✓ " : ""}{t === "all" ? "📢 All Users" : "👤 Specific Users"}
+                      </button>
+                    )
+                  })}
                 </div>
               </div>
 

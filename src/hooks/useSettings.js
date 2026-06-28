@@ -28,6 +28,7 @@ const DEFAULT_SETTINGS = {
   buffer_percentage: '10',
   max_retry_attempts: '2',
   auto_refund_on_failure: 'false',
+  auto_assign_cron_enabled: 'true',
 };
 
 export function useSettings() {

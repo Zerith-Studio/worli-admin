@@ -35,12 +35,12 @@ export function useRoutes() {
       );
       if (routesError) throw routesError;
 
-      // Fetch today's rider assignments
+      // Fetch rider assignments: permanent (assigned_date IS NULL) + today's overrides.
       const today = new Date().toISOString().split('T')[0];
       const { data: riderRoutesData } = await supabase
         .from('rider_routes')
-        .select('route_id, rider_id')
-        .eq('assigned_date', today);
+        .select('route_id, rider_id, assigned_date')
+        .or(`assigned_date.is.null,assigned_date.eq.${today}`);
 
       // Resolve rider names
       const riderIds = [...new Set(riderRoutesData?.map(rr => rr.rider_id) || [])];
@@ -51,24 +51,28 @@ export function useRoutes() {
         usersData?.forEach(u => { usersMap[u.id] = u; });
       }
 
-      const riderMap = {};
+      // Effective driver per route = today's override wins over permanent.
+      const permMap = {};
+      const overrideMap = {};
       riderRoutesData?.forEach(rr => {
-        riderMap[rr.route_id] = {
-          rider_id: rr.rider_id,
-          full_name: usersMap[rr.rider_id]?.full_name || 'Unassigned',
-        };
+        if (rr.assigned_date === null) permMap[rr.route_id] = rr.rider_id;
+        else overrideMap[rr.route_id] = rr.rider_id;
       });
 
-      const transformedData = routesData?.map(route => ({
-        id: route.id,
-        name: route.name,
-        hubId: route.hub_id,
-        hubName: route.hubs?.name || 'No Hub',
-        description: route.description || '',
-        isActive: route.is_active,
-        driverId: riderMap[route.id]?.rider_id || null,
-        driverName: riderMap[route.id]?.full_name || 'Unassigned',
-      })) || [];
+      const transformedData = routesData?.map(route => {
+        const effectiveRiderId = overrideMap[route.id] ?? permMap[route.id] ?? null;
+        return {
+          id: route.id,
+          name: route.name,
+          hubId: route.hub_id,
+          hubName: route.hubs?.name || 'No Hub',
+          description: route.description || '',
+          isActive: route.is_active,
+          driverId: effectiveRiderId,
+          driverName: effectiveRiderId ? (usersMap[effectiveRiderId]?.full_name || 'Unassigned') : 'Unassigned',
+          isOverriddenToday: overrideMap[route.id] != null,
+        };
+      }) || [];
 
       if (!mountedRef.current) return;
       setRoutes(transformedData);
@@ -130,12 +134,12 @@ export function useRoutes() {
     }
   }, [fetchRoutes]);
 
+  // Assign the route's standing (permanent) driver from the Routes page.
   const assignDriver = useCallback(async (routeId, riderId) => {
     try {
-      const today = new Date().toISOString().split('T')[0];
-      const { error } = await supabase.from('rider_routes').upsert({
-        route_id: routeId, rider_id: riderId, assigned_date: today,
-      }, { onConflict: 'rider_id,route_id,assigned_date' });
+      const { error } = await supabase.rpc('set_permanent_route', {
+        p_route_id: routeId, p_rider_id: riderId,
+      });
       if (error) throw error;
       await fetchRoutes();
       return { success: true };

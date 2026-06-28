@@ -208,8 +208,12 @@ export function useOrders() {
 
   const autoAssignOrders = useCallback(async (date) => {
     try {
-      const { error } = await supabase.rpc('assign_riders_to_orders', { p_date: date })
-      if (error) throw error
+      const [orderRes, returnRes] = await Promise.all([
+        supabase.rpc('assign_riders_to_orders', { p_date: date }),
+        supabase.rpc('assign_riders_to_bottle_returns', { p_date: date }),
+      ])
+      if (orderRes.error) throw orderRes.error
+      if (returnRes.error) throw returnRes.error
       await fetchOrders()
       return { success: true }
     } catch (err) {

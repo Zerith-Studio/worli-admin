@@ -175,6 +175,19 @@ export function SettingsPage() {
             <label className="form-label">Cron Secret</label>
             <input type="password" className="form-input" value={localSettings.cron_secret || ''} onChange={e => updateLocal('cron_secret', e.target.value)} />
           </div>
+          <div className="form-group">
+            <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={(localSettings.auto_assign_cron_enabled ?? 'true') !== 'false'}
+                onChange={e => updateLocal('auto_assign_cron_enabled', e.target.checked ? 'true' : 'false')}
+              />
+              Nightly auto-assign riders (12 AM IST)
+            </label>
+            <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 4 }}>
+              When off, the nightly cron skips and you assign riders manually via "Run Auto-Assignment".
+            </div>
+          </div>
         </div>
       </div>
 
