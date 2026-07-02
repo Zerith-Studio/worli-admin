@@ -215,7 +215,11 @@ export function useOrders() {
       if (orderRes.error) throw orderRes.error
       if (returnRes.error) throw returnRes.error
       await fetchOrders()
-      return { success: true }
+      return {
+        success: true,
+        ordersAssigned: orderRes.data?.updated ?? 0,
+        returnsAssigned: returnRes.data?.updated ?? 0,
+      }
     } catch (err) {
       return { success: false, error: err.message }
     }

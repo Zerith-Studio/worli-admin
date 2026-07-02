@@ -13,8 +13,10 @@ import { Drawer } from "../ui/Drawer"
 import { StatusBadge } from "../ui/StatusBadge"
 
 function todayStr() {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+  // IST calendar date (YYYY-MM-DD) to match how the rider app stamps
+  // rider_attendance.date — otherwise a browser in another timezone can query
+  // the wrong day near the early-morning check-in window and miss the row.
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date())
 }
 
 export function AttendancePage() {
@@ -126,9 +128,9 @@ export function AttendancePage() {
                 </td>
                 <td>
                   {rider.isPresent ? (
-                    <Badge variant="success">Present</Badge>
+                    <Badge variant="green">Present</Badge>
                   ) : (
-                    <Badge variant="neutral">Absent</Badge>
+                    <Badge variant="gray">Absent</Badge>
                   )}
                 </td>
                 <td style={{ fontFamily: "'DM Mono',monospace", fontSize: 13 }}>
@@ -172,7 +174,7 @@ export function AttendancePage() {
             <div>
               <div style={{ fontSize: 12, color: "var(--text-3)" }}>Status</div>
               <div style={{ marginTop: 4 }}>
-                {selectedRider.isPresent ? <Badge variant="success">Present</Badge> : <Badge variant="neutral">Absent</Badge>}
+                {selectedRider.isPresent ? <Badge variant="green">Present</Badge> : <Badge variant="gray">Absent</Badge>}
               </div>
             </div>
             <div>

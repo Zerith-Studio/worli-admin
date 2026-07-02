@@ -55,6 +55,7 @@ export function OrdersPage() {
   const [selectedDriver, setSelectedDriver] = useState('');
   const [reassigning, setReassigning] = useState(false);
   const [autoAssigning, setAutoAssigning] = useState(false);
+  const [assignResult, setAssignResult] = useState(null); // { ordersAssigned, returnsAssigned } | null
 
   useDataRefresh(refresh, 60000, true);
 
@@ -121,8 +122,20 @@ export function OrdersPage() {
     setAutoAssigning(false);
     if (!result.success) {
       alert("Auto-assignment failed: " + result.error);
+      return;
     }
+    setAssignResult({
+      ordersAssigned: result.ordersAssigned,
+      returnsAssigned: result.returnsAssigned,
+    });
   };
+
+  // Auto-dismiss the assignment toast after a few seconds.
+  React.useEffect(() => {
+    if (!assignResult) return;
+    const t = setTimeout(() => setAssignResult(null), 5000);
+    return () => clearTimeout(t);
+  }, [assignResult]);
 
   if (loading && orders.length === 0) {
     return (
@@ -142,6 +155,36 @@ export function OrdersPage() {
 
   return (
     <div>
+      {assignResult && (
+        <div
+          onClick={() => setAssignResult(null)}
+          style={{
+            position: 'fixed',
+            top: 20,
+            right: 20,
+            zIndex: 1000,
+            background: 'var(--green)',
+            color: '#fff',
+            padding: '12px 18px',
+            borderRadius: 8,
+            boxShadow: '0 4px 16px rgba(0,0,0,0.25)',
+            cursor: 'pointer',
+            maxWidth: 360,
+            fontSize: 14,
+            fontWeight: 500,
+          }}
+        >
+          {(() => {
+            const o = assignResult.ordersAssigned;
+            const r = assignResult.returnsAssigned;
+            if (o === 0 && r === 0) return '✓ Auto-assignment complete — nothing new to assign.';
+            const parts = [];
+            if (o > 0) parts.push(`${o} order${o === 1 ? '' : 's'}`);
+            if (r > 0) parts.push(`${r} bottle return${r === 1 ? '' : 's'}`);
+            return `✓ Assigned ${parts.join(' and ')} to riders.`;
+          })()}
+        </div>
+      )}
       <div className="page-header" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
         <div>
           <div className="page-title">Orders</div>

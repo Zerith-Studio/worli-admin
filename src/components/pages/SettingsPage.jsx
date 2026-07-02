@@ -122,10 +122,6 @@ export function SettingsPage() {
             <input type="number" className="form-input" value={localSettings.min_wallet_recharge || '350'} onChange={e => updateLocal('min_wallet_recharge', e.target.value)} />
           </div>
           <div className="form-group">
-            <label className="form-label">Min Bottles Recharge Amount (₹)</label>
-            <input type="number" className="form-input" value={localSettings.min_bottles_recharge || '1'} onChange={e => updateLocal('min_bottles_recharge', e.target.value)} />
-          </div>
-          <div className="form-group">
             <label className="form-label">Referrer Reward Amount (₹)</label>
             <input type="number" className="form-input" value={localSettings.referral_reward_amount || '60'} onChange={e => updateLocal('referral_reward_amount', e.target.value)} />
           </div>

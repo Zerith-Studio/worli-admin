@@ -19,7 +19,6 @@ const DEFAULT_SETTINGS = {
   contact_whatsapp_phone: '',
   contact_whatsapp: '',
   cron_secret: '',
-  min_bottles_recharge: '1',
   min_wallet_recharge: '350',
   delivery_info: '',
   app_download_link: '',
