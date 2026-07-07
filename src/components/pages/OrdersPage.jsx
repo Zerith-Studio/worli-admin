@@ -33,7 +33,6 @@ export function OrdersPage() {
     filters, 
     updateFilters, 
     updateOrderStatus,
-    updateOrderNotes,
     reassignDriver,
     retryOrder,
     autoAssignOrders,
@@ -111,6 +110,7 @@ export function OrdersPage() {
     if (result.success) {
       setReassignModal(null);
       setSelectedOrder(prev => prev ? { ...prev, riderId: selectedDriver } : null);
+      if (result.warning) alert(result.warning);
     } else {
       alert("Failed to reassign: " + result.error);
     }
@@ -552,7 +552,7 @@ export function OrdersPage() {
             </select>
           </div>
           <div style={{ padding: '10px 12px', background: 'var(--bg)', borderRadius: 7, fontSize: 12, color: 'var(--text-3)', marginTop: 4 }}>
-            ℹ️ Reassigning an order will explicitly force it to this driver, bypassing standard route assignments.
+            Reassigning uses the same route override path as auto-assignment for this order's route and date.
           </div>
         </Modal>
       )}

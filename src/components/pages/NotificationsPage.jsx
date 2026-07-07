@@ -5,28 +5,10 @@
 
 import React, { useState, useEffect, useCallback, useRef } from "react"
 import { supabase } from "../../lib/supabase"
+import { getFunctionErrorMessage } from "../../lib/function-errors"
 import { Button } from "../ui/Button"
 import { Modal } from "../ui/Modal"
 import { Drawer } from "../ui/Drawer"
-
-// ─── Pull the real error out of a failed functions.invoke ─────
-// On a non-2xx response supabase-js sets `error` (FunctionsHttpError) and the
-// actual body lives on error.context (a Response). Without this you only ever
-// see the generic "Edge Function returned a non-2xx status code".
-async function extractInvokeError(error, data) {
-  if (data?.error) return data.error
-  if (error?.context && typeof error.context.json === "function") {
-    try {
-      const body = await error.context.clone().json()
-      if (body?.error) return body.error
-    } catch { /* fall through to text */ }
-    try {
-      const text = await error.context.text()
-      if (text) return text
-    } catch { /* ignore */ }
-  }
-  return error?.message || "Unknown error"
-}
 
 // ─── Image upload (mirrors ProductsPage pattern) ──────────────
 const NOTIF_BUCKET = "notification-images"
@@ -217,6 +199,15 @@ function UserSearch({ selectedUsers, onSelectionChange }) {
 
 // ─── Notification Detail Drawer ───────────────────────────────
 // Shows every field stored on a push_notifications row.
+function NotificationDetailRow({ label, children }) {
+  return (
+    <div className="stat-row" style={{ alignItems: "flex-start" }}>
+      <div className="stat-label" style={{ minWidth: 120 }}>{label}</div>
+      <div style={{ fontSize: 13, fontWeight: 500, textAlign: "right", wordBreak: "break-word", maxWidth: 300 }}>{children ?? "—"}</div>
+    </div>
+  )
+}
+
 function NotificationDetailDrawer({ notif, onClose }) {
   const [recipients, setRecipients] = useState(null)
 
@@ -237,40 +228,33 @@ function NotificationDetailDrawer({ notif, onClose }) {
   const fmt = (iso) =>
     iso ? new Date(iso).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"
 
-  const Row = ({ label, children }) => (
-    <div className="stat-row" style={{ alignItems: "flex-start" }}>
-      <div className="stat-label" style={{ minWidth: 120 }}>{label}</div>
-      <div style={{ fontSize: 13, fontWeight: 500, textAlign: "right", wordBreak: "break-word", maxWidth: 300 }}>{children ?? "—"}</div>
-    </div>
-  )
-
   return (
     <Drawer title="Notification Details" onClose={onClose}>
       <NotificationPreview title={notif.title} body={notif.body} imageUrl={notif.image_url} />
 
       <div style={{ marginTop: 16 }}>
-        <Row label="ID"><span style={{ fontFamily: "'DM Mono',monospace", fontSize: 11.5 }}>{notif.id}</span></Row>
-        <Row label="Title">{notif.title}</Row>
-        <Row label="Body">{notif.body}</Row>
-        <Row label="Image URL">{notif.image_url
+        <NotificationDetailRow label="ID"><span style={{ fontFamily: "'DM Mono',monospace", fontSize: 11.5 }}>{notif.id}</span></NotificationDetailRow>
+        <NotificationDetailRow label="Title">{notif.title}</NotificationDetailRow>
+        <NotificationDetailRow label="Body">{notif.body}</NotificationDetailRow>
+        <NotificationDetailRow label="Image URL">{notif.image_url
           ? <a href={notif.image_url} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>{notif.image_url}</a>
-          : "—"}</Row>
-        <Row label="Target Type">{TARGET_LABELS[notif.target_type] ?? notif.target_type}</Row>
-        <Row label="Status">{notif.status}</Row>
-        <Row label="Sent Count"><span style={{ color: "var(--green)", fontWeight: 700 }}>{notif.sent_count}</span></Row>
-        <Row label="Failed Count"><span style={{ color: notif.failed_count > 0 ? "var(--red)" : "var(--text-3)" }}>{notif.failed_count}</span></Row>
-        <Row label="Sent By">{notif.sent_by
+          : "—"}</NotificationDetailRow>
+        <NotificationDetailRow label="Target Type">{TARGET_LABELS[notif.target_type] ?? notif.target_type}</NotificationDetailRow>
+        <NotificationDetailRow label="Status">{notif.status}</NotificationDetailRow>
+        <NotificationDetailRow label="Sent Count"><span style={{ color: "var(--green)", fontWeight: 700 }}>{notif.sent_count}</span></NotificationDetailRow>
+        <NotificationDetailRow label="Failed Count"><span style={{ color: notif.failed_count > 0 ? "var(--red)" : "var(--text-3)" }}>{notif.failed_count}</span></NotificationDetailRow>
+        <NotificationDetailRow label="Sent By">{notif.sent_by
           ? <span style={{ fontFamily: "'DM Mono',monospace", fontSize: 11.5 }}>{notif.sent_by}</span>
-          : "—"}</Row>
-        <Row label="Created At">{fmt(notif.created_at)}</Row>
-        <Row label="Sent At">{fmt(notif.sent_at)}</Row>
-        <Row label="Recipients">
+          : "—"}</NotificationDetailRow>
+        <NotificationDetailRow label="Created At">{fmt(notif.created_at)}</NotificationDetailRow>
+        <NotificationDetailRow label="Sent At">{fmt(notif.sent_at)}</NotificationDetailRow>
+        <NotificationDetailRow label="Recipients">
           {!Array.isArray(notif.user_ids) || notif.user_ids.length === 0
             ? "All users (broadcast)"
             : recipients === null
               ? `${notif.user_ids.length} user(s) — loading…`
               : `${notif.user_ids.length} user(s)`}
-        </Row>
+        </NotificationDetailRow>
       </div>
 
       {/* Resolved recipient list */}
@@ -413,7 +397,7 @@ export function NotificationsPage() {
 
     setSending(false)
     if (error || !data?.success) {
-      setSendResult({ ok: false, msg: await extractInvokeError(error, data) })
+      setSendResult({ ok: false, msg: await getFunctionErrorMessage(error, data) })
     } else {
       setSendResult({ ok: true, sent: data.sent, failed: data.failed })
       setIsModalOpen(false)
@@ -429,7 +413,7 @@ export function NotificationsPage() {
     const { data, error } = await supabase.functions.invoke("notify-low-bottles", { body: {} })
     setSending(false)
     if (error || !data?.success) {
-      alert("Error: " + (await extractInvokeError(error, data)))
+      alert("Error: " + (await getFunctionErrorMessage(error, data)))
     } else {
       alert(`✅ Notified ${data.notified} users (${data.failed ?? 0} failed)`)
       fetchHistory()

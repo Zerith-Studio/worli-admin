@@ -6,6 +6,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
+import { throwFunctionError } from '../lib/function-errors';
 import { withTimeout } from '../lib/query';
 
 const PAGE_SIZE = 20;
@@ -111,23 +112,20 @@ export function useWalletStats() {
       const balanceBefore = wallet?.balance ?? 0;
       const newBalance = balanceBefore + amount;
 
-      const { error: updateError } = await supabase
-        .from('wallets').update({ balance: newBalance }).eq('user_id', userId);
-      if (updateError) throw updateError;
-
-      const { error: txnError } = await supabase.from('transactions').insert({
-        transaction_id: `ADM-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        user_id: userId,
-        wallet_id: wallet?.id,
-        type: 'credit',
-        amount,
-        balance_before: balanceBefore,
-        balance_after: newBalance,
-        description: reason,
-        payment_method: 'admin_adjustment',
-        status: 'completed',
+      const { data, error } = await supabase.functions.invoke('admin-db-action', {
+        body: {
+          action: 'rpc',
+          fn: 'rpc_admin_adjust_wallet',
+          params: {
+            p_user_id: userId,
+            p_new_balance: newBalance,
+            p_create_txn: true,
+            p_note: reason,
+          },
+        },
       });
-      if (txnError) throw txnError;
+      if (error) await throwFunctionError(error, data);
+      if (data?.error) await throwFunctionError(null, data);
 
       await fetchWalletStats();
       return { success: true };

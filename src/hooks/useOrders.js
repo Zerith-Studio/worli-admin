@@ -6,6 +6,7 @@
 import { useState, useEffect, useCallback, useRef } from "react"
 import { supabase } from "../lib/supabase"
 import { withTimeout } from "../lib/query"
+import { throwFunctionError } from "../lib/function-errors"
 
 const PAGE_SIZE = 20
 
@@ -87,6 +88,7 @@ export function useOrders() {
           failReason: order.failure_reason,
           cancellationReason: order.cancellation_reason,
           riderId: order.rider_id,
+          routeId: order.route_id,
           routeStopId: order.route_stop_id,
           stopName: order.route_stops?.name || "—",
           deliveredAt: order.delivered_at,
@@ -96,6 +98,43 @@ export function useOrders() {
           bottlesCollected: order.bottles_collected || 0,
           discountAmount: order.discount_amount || 0,
         })) || []
+
+      const findStoredPhoto = async (folder, orderId) => {
+        const { data: files } = await supabase.storage
+          .from("delivery-photos")
+          .list(folder, {
+            limit: 10,
+            search: `${orderId}_`,
+            sortBy: { column: "created_at", order: "desc" },
+          })
+
+        const file = files?.find((f) => f.name.startsWith(`${orderId}_`))
+        if (!file) return null
+
+        const { data: publicUrlData } = supabase.storage
+          .from("delivery-photos")
+          .getPublicUrl(`${folder}/${file.name}`)
+
+        return publicUrlData.publicUrl || null
+      }
+
+      const missingEvidenceOrders = transformedData.filter(
+        (order) => order.status === "delivered" && (!order.deliveryPhotoUrl || !order.bottlePhotoUrl),
+      )
+
+      if (missingEvidenceOrders.length > 0) {
+        await Promise.all(
+          missingEvidenceOrders.map(async (order) => {
+            const [deliveryPhotoUrl, bottlePhotoUrl] = await Promise.all([
+              order.deliveryPhotoUrl ? Promise.resolve(order.deliveryPhotoUrl) : findStoredPhoto("delivery", order.id),
+              order.bottlePhotoUrl ? Promise.resolve(order.bottlePhotoUrl) : findStoredPhoto("bottles", order.id),
+            ])
+
+            order.deliveryPhotoUrl = deliveryPhotoUrl
+            order.bottlePhotoUrl = bottlePhotoUrl
+          }),
+        )
+      }
 
       setOrders(transformedData)
       setTotalCount(count || 0)
@@ -165,13 +204,14 @@ export function useOrders() {
   const reassignDriver = useCallback(
     async (id, riderId) => {
       try {
-        const { error } = await supabase
-          .from("orders")
-          .update({ rider_id: riderId })
-          .eq("id", id)
-        if (error) throw error
+        const { data, error } = await supabase.rpc("admin_assign_order_to_rider", {
+          p_order_id: id,
+          p_rider_id: riderId,
+        })
+        if (error) await throwFunctionError(error, data)
+        if (data?.error) await throwFunctionError(null, data)
         await fetchOrders()
-        return { success: true }
+        return { success: true, mode: data?.mode, warning: data?.warning }
       } catch (err) {
         return { success: false, error: err.message }
       }

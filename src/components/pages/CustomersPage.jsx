@@ -17,6 +17,7 @@ import { Button } from '../ui/Button';
 import { LoadingSpinner } from '../ui/LoadingSpinner';
 import { UserDetailDrawer } from '../ui/UserDetailDrawer';
 import { supabase } from '../../lib/supabase';
+import { throwFunctionError } from '../../lib/function-errors';
 
 const STATUSES = [
   { value: 'all', label: 'All Statuses' },
@@ -64,8 +65,8 @@ export function CustomersPage() {
           email: createForm.email.trim() || undefined,
         },
       });
-      if (res.error) throw new Error(res.error.message || JSON.stringify(res.error));
-      if (res.data?.error) throw new Error(res.data.error);
+      if (res.error) await throwFunctionError(res.error, res.data);
+      if (res.data?.error) await throwFunctionError(null, res.data);
       setCreateState({ loading: false, error: null, success: `Customer "${createForm.full_name.trim()}" created successfully! They can now log in via OTP.` });
       setCreateForm({ full_name: '', phone: '', email: '' });
       setTimeout(() => { setCreateModal(false); setCreateState({ loading: false, error: null, success: null }); refresh(); }, 2500);

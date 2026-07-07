@@ -5,6 +5,7 @@
 import { useState, useEffect, useCallback, useRef } from "react"
 import { supabase } from "../lib/supabase"
 import { withTimeout } from "../lib/query"
+import { throwFunctionError } from "../lib/function-errors"
 
 const PAGE_SIZE = 12
 
@@ -160,7 +161,7 @@ export function useCustomers() {
       const { data, error } = await supabase.functions.invoke("trigger-autopay-charge", {
         body: { user_id: userId }
       })
-      if (error) throw error
+      if (error) await throwFunctionError(error, data)
       if (!data?.triggered) throw new Error(data?.reason || "Failed to trigger recharge")
       await fetchCustomers(true)
       return { success: true, amount_charged: data.amount_charged }

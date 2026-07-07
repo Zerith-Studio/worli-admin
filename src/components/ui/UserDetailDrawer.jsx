@@ -16,6 +16,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../../lib/supabase';
+import { throwFunctionError } from '../../lib/function-errors';
 import { Drawer } from './Drawer';
 import { StatusBadge } from './StatusBadge';
 import { LoadingSpinner } from './LoadingSpinner';
@@ -168,8 +169,8 @@ export function UserDetailDrawer({ userId, onClose }) {
       const res = await supabase.functions.invoke('admin-db-action', {
         body: { action: 'insert', table: 'orders', payload }
       });
-      if (res.error) throw new Error(res.error.message || JSON.stringify(res.error));
-      if (res.data?.error) throw new Error(res.data.error);
+      if (res.error) await throwFunctionError(res.error, res.data);
+      if (res.data?.error) await throwFunctionError(null, res.data);
       
       setOrderState({ loading: false, error: null, success: `Order ${orderNum} created!` });
       fetchAll();
@@ -200,13 +201,13 @@ export function UserDetailDrawer({ userId, onClose }) {
       const res = await supabase.functions.invoke('admin-db-action', {
         body: { action: 'rpc', fn: 'rpc_create_subscription', params }
       });
-      if (res.error) throw new Error(res.error.message || JSON.stringify(res.error));
+      if (res.error) await throwFunctionError(res.error, res.data);
       if (res.data?.error) {
         const d = res.data.data;
         if (d?.error === 'INSUFFICIENT_FUNDS') {
           throw new Error(`Insufficient wallet balance. Short by ₹${Number(d.shortfall || 0).toFixed(2)}. Top up the wallet first.`);
         }
-        throw new Error(res.data.error);
+        await throwFunctionError(null, res.data);
       }
 
       setSubState({ loading: false, error: null, success: 'Subscription created successfully!' });
@@ -228,8 +229,8 @@ export function UserDetailDrawer({ userId, onClose }) {
           params: { p_user_id: userId, p_new_balance: newBal, p_create_txn: walletForm.create_txn, p_note: walletForm.note || null },
         },
       });
-      if (res.error) throw new Error(res.error.message || JSON.stringify(res.error));
-      if (res.data?.error) throw new Error(res.data.error);
+      if (res.error) await throwFunctionError(res.error, res.data);
+      if (res.data?.error) await throwFunctionError(null, res.data);
       setWalletState({ loading: false, error: null, success: `Balance updated to ${money(newBal)}.` });
       setWalletForm({ new_balance: '', create_txn: true, note: '' });
       setTimeout(() => setShowWalletForm(false), 1200);
@@ -262,8 +263,8 @@ export function UserDetailDrawer({ userId, onClose }) {
       const res = await supabase.functions.invoke('admin-db-action', {
         body: { action: 'insert', table: 'addresses', payload }
       });
-      if (res.error) throw new Error(res.error.message || JSON.stringify(res.error));
-      if (res.data?.error) throw new Error(res.data.error);
+      if (res.error) await throwFunctionError(res.error, res.data);
+      if (res.data?.error) await throwFunctionError(null, res.data);
 
       setAddressState({ loading: false, error: null, success: 'Address created!' });
       setAddressForm({ name: 'Home', address_line1: '', address_line2: '', floor_number: '', landmark: '', city: '', state: '', pincode: '', delivery_instructions: '', latitude: '', longitude: '' });

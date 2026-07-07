@@ -5,6 +5,7 @@
 
 import React, { useState, useEffect, useCallback } from "react"
 import { supabase } from "../../lib/supabase"
+import { getFunctionErrorMessage } from "../../lib/function-errors"
 import { Button } from "../ui/Button"
 import { StatusBadge } from "../ui/StatusBadge"
 import { LoadingSpinner } from "../ui/LoadingSpinner"
@@ -74,7 +75,7 @@ export function TrialApprovalsPage() {
         },
       })
       if (res.error || res.data?.error) {
-        throw new Error(res.data?.error ?? res.error?.message ?? "Action failed")
+        throw new Error(await getFunctionErrorMessage(res.error, res.data))
       }
       await fetchClaims()
     } catch (e) {
