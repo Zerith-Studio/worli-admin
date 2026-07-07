@@ -103,6 +103,7 @@ export function useSubscriptions() {
           startDate: sub.start_date,
           endDate: sub.end_date,
           durationMonths: sub.duration_months,
+          durationDays: sub.duration_days,
           price: (sub.products?.price || 0) * (sub.quantity || 1),
           discountAmount: sub.discount_amount || 0,
           remainingBottles: sub.remaining_bottles,

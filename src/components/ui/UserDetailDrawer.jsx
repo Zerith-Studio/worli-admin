@@ -26,6 +26,16 @@ const fmtDate = (iso) =>
 const fmtDateTime = (iso) =>
   iso ? new Date(iso).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—';
 const money = (n) => `₹${Number(n || 0).toLocaleString('en-IN')}`;
+const positiveInt = (value) => {
+  const n = Number.parseInt(value, 10);
+  return Number.isInteger(n) && n > 0 ? n : null;
+};
+const fmtDuration = (sub) => {
+  if (sub?.duration_months && sub?.duration_days) return `${sub.duration_months}mo / ${sub.duration_days} days`;
+  if (sub?.duration_days) return `${sub.duration_days} days`;
+  if (sub?.duration_months) return `${sub.duration_months}mo`;
+  return '—';
+};
 
 function Row({ label, value }) {
   return (
@@ -62,18 +72,24 @@ function MiniTable({ columns, rows, empty, renderRow }) {
   );
 }
 
-export function UserDetailDrawer({ userId, onClose }) {
+export function UserDetailDrawer({ userId, onClose, onUserUpdated }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState('profile');
   const [products, setProducts] = useState([]);
+  const [subscriptionProducts, setSubscriptionProducts] = useState([]);
+
+  // Profile edit state
+  const [showProfileForm, setShowProfileForm] = useState(false);
+  const [profileForm, setProfileForm] = useState({ full_name: '', phone_number: '', email: '', is_active: true });
+  const [profileState, setProfileState] = useState({ loading: false, error: null, success: null });
 
   // Create Order state
   const [orderForm, setOrderForm] = useState({ product_id: '', address_id: '', delivery_date: '', quantity: '1', amount: '0' });
   const [orderState, setOrderState] = useState({ loading: false, error: null, success: null });
 
   // Create Subscription state
-  const [subForm, setSubForm] = useState({ product_id: '', address_id: '', frequency: 'daily', quantity: '1', start_date: '', duration_months: '1', interval_days: '2', custom_quantities: { '0': 0, '1': 0, '2': 0, '3': 0, '4': 0, '5': 0, '6': 0 } });
+  const [subForm, setSubForm] = useState({ product_id: '', address_id: '', frequency: 'daily', quantity: '1', start_date: '', duration_mode: 'months', duration_months: '1', duration_days: '30', interval_days: '2', custom_quantities: { '0': 0, '1': 0, '2': 0, '3': 0, '4': 0, '5': 0, '6': 0 } });
   const [subState, setSubState] = useState({ loading: false, error: null, success: null });
 
   // Create Address state
@@ -141,10 +157,21 @@ export function UserDetailDrawer({ userId, onClose }) {
 
   useEffect(() => { if (userId) fetchAll(); }, [userId, fetchAll]);
 
+  useEffect(() => {
+    if (!data?.user) return;
+    setProfileForm({
+      full_name: data.user.full_name || '',
+      phone_number: data.user.phone_number || '',
+      email: data.user.email || '',
+      is_active: data.user.is_active !== false,
+    });
+  }, [data?.user]);
+
   // Fetch products for create forms
   useEffect(() => {
-    supabase.from('products').select('id, name, price').eq('is_active', true).then(({ data }) => {
+    supabase.from('products').select('id, name, price, product_type').eq('is_active', true).then(({ data }) => {
       if (data) setProducts(data);
+      setSubscriptionProducts((data || []).filter(product => product.product_type === 'subscription'));
     });
   }, []);
 
@@ -177,9 +204,75 @@ export function UserDetailDrawer({ userId, onClose }) {
     } catch (err) { setOrderState({ loading: false, error: err.message, success: null }); }
   };
 
+  const handleSaveProfile = async () => {
+    const fullName = profileForm.full_name.trim();
+    const phone = profileForm.phone_number.trim();
+    const email = profileForm.email.trim();
+
+    if (!fullName || fullName.length < 2) {
+      setProfileState({ loading: false, error: 'Full name must be at least 2 characters.', success: null });
+      return;
+    }
+    if (!phone) {
+      setProfileState({ loading: false, error: 'Phone number is required.', success: null });
+      return;
+    }
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setProfileState({ loading: false, error: 'Please enter a valid email address.', success: null });
+      return;
+    }
+
+    setProfileState({ loading: true, error: null, success: null });
+    try {
+      const res = await supabase.functions.invoke('admin-db-action', {
+        body: {
+          action: 'update',
+          table: 'users',
+          payload: {
+            id: userId,
+            full_name: fullName,
+            phone_number: phone,
+            email: email || null,
+            is_active: !!profileForm.is_active,
+          },
+        },
+      });
+      if (res.error) await throwFunctionError(res.error, res.data);
+      if (res.data?.error) await throwFunctionError(null, res.data);
+      setProfileState({ loading: false, error: null, success: 'Profile updated.' });
+      setShowProfileForm(false);
+      await fetchAll();
+      onUserUpdated?.();
+    } catch (err) {
+      setProfileState({ loading: false, error: err.message, success: null });
+    }
+  };
+
   const handleCreateSubscription = async () => {
     if (!subForm.product_id || !subForm.address_id || !subForm.start_date) {
       setSubState({ loading: false, error: 'Product, address and start date are required.', success: null }); return;
+    }
+    const durationMonths = subForm.duration_mode === 'months' ? positiveInt(subForm.duration_months) : null;
+    const durationDays = subForm.duration_mode === 'days' ? positiveInt(subForm.duration_days) : null;
+    if (subForm.duration_mode === 'months' && !durationMonths) {
+      setSubState({ loading: false, error: 'Enter a valid positive month duration.', success: null }); return;
+    }
+    if (subForm.duration_mode === 'days' && !durationDays) {
+      setSubState({ loading: false, error: 'Enter a valid positive day duration.', success: null }); return;
+    }
+    const quantity = positiveInt(subForm.quantity);
+    if (subForm.frequency !== 'custom' && !quantity) {
+      setSubState({ loading: false, error: 'Quantity must be at least 1.', success: null }); return;
+    }
+    const intervalDays = subForm.frequency === 'on_interval' ? positiveInt(subForm.interval_days) : null;
+    if (subForm.frequency === 'on_interval' && !intervalDays) {
+      setSubState({ loading: false, error: 'Interval must be at least 1 day.', success: null }); return;
+    }
+    const customQuantities = Object.fromEntries(
+      Object.entries(subForm.custom_quantities).map(([day, value]) => [day, Math.max(0, Number.parseInt(value, 10) || 0)])
+    );
+    if (subForm.frequency === 'custom' && !Object.values(customQuantities).some(value => value > 0)) {
+      setSubState({ loading: false, error: 'Set at least one custom day quantity greater than zero.', success: null }); return;
     }
     setSubState({ loading: true, error: null, success: null });
     try {
@@ -191,11 +284,12 @@ export function UserDetailDrawer({ userId, onClose }) {
         p_product_id: subForm.product_id,
         p_address_id: subForm.address_id,
         p_frequency: subForm.frequency,
-        p_duration_months: parseInt(subForm.duration_months) || 1,
+        p_duration_months: durationMonths,
+        p_duration_days: durationDays,
         p_start_date: subForm.start_date,
-        p_quantity: parseInt(subForm.quantity) || 1,
-        p_interval_days: subForm.frequency === 'on_interval' ? (parseInt(subForm.interval_days) || 2) : null,
-        p_custom_quantities: subForm.frequency === 'custom' ? subForm.custom_quantities : null,
+        p_quantity: quantity || 1,
+        p_interval_days: intervalDays,
+        p_custom_quantities: subForm.frequency === 'custom' ? customQuantities : null,
       };
 
       const res = await supabase.functions.invoke('admin-db-action', {
@@ -330,6 +424,50 @@ export function UserDetailDrawer({ userId, onClose }) {
           {/* PROFILE — every users column + preferences */}
           {tab === 'profile' && (
             <div style={{ marginTop: 12 }}>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
+                <button
+                  onClick={() => {
+                    setShowProfileForm(!showProfileForm);
+                    setProfileState({ loading: false, error: null, success: null });
+                  }}
+                  style={{ fontSize: 11, padding: '4px 10px', borderRadius: 4, background: 'var(--accent)', color: '#fff', border: 'none', cursor: 'pointer' }}
+                >
+                  {showProfileForm ? 'Cancel' : 'Edit Profile'}
+                </button>
+              </div>
+
+              {showProfileForm && (
+                <div style={{ background: 'var(--bg)', borderRadius: 8, padding: 14, marginBottom: 16, display: 'grid', gap: 10 }}>
+                  <div className="form-group">
+                    <label className="form-label">Full Name *</label>
+                    <input className="form-input" value={profileForm.full_name} onChange={e => setProfileForm(p => ({ ...p, full_name: e.target.value }))} />
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                    <div className="form-group">
+                      <label className="form-label">Phone *</label>
+                      <input className="form-input" value={profileForm.phone_number} onChange={e => setProfileForm(p => ({ ...p, phone_number: e.target.value }))} />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Email</label>
+                      <input type="email" className="form-input" value={profileForm.email} onChange={e => setProfileForm(p => ({ ...p, email: e.target.value }))} />
+                    </div>
+                  </div>
+                  <label style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <input type="checkbox" checked={profileForm.is_active} onChange={e => setProfileForm(p => ({ ...p, is_active: e.target.checked }))} />
+                    Account active
+                  </label>
+                  {profileState.error && <div style={{ padding: '8px 12px', background: 'var(--red-bg)', color: 'var(--red)', borderRadius: 6, fontSize: 12 }}>{profileState.error}</div>}
+                  {profileState.success && <div style={{ padding: '8px 12px', background: 'var(--green-bg)', color: 'var(--green)', borderRadius: 6, fontSize: 12 }}>✓ {profileState.success}</div>}
+                  <button
+                    onClick={handleSaveProfile}
+                    disabled={profileState.loading}
+                    style={{ justifySelf: 'start', padding: '7px 14px', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 6, cursor: profileState.loading ? 'not-allowed' : 'pointer', fontSize: 12, fontWeight: 600, opacity: profileState.loading ? 0.7 : 1 }}
+                  >
+                    {profileState.loading ? 'Saving...' : 'Save Profile'}
+                  </button>
+                </div>
+              )}
+
               <Row label="User ID" value={<span style={{ fontFamily: "'DM Mono',monospace", fontSize: 11 }}>{u.id}</span>} />
               <Row label="Full Name" value={u.full_name || '—'} />
               <Row label="Phone" value={u.phone_number || '—'} />
@@ -461,7 +599,7 @@ export function UserDetailDrawer({ userId, onClose }) {
                       <label className="form-label">Product *</label>
                       <select className="form-select" value={subForm.product_id} onChange={e => setSubForm(p => ({ ...p, product_id: e.target.value }))}>
                         <option value="">— Select Product —</option>
-                        {products.map(p => <option key={p.id} value={p.id}>{p.name} (₹{p.price}/unit)</option>)}
+                        {subscriptionProducts.map(p => <option key={p.id} value={p.id}>{p.name} (₹{p.price}/unit)</option>)}
                       </select>
                     </div>
                     <div className="form-group" style={{ flex: 1 }}>
@@ -498,8 +636,29 @@ export function UserDetailDrawer({ userId, onClose }) {
                       </div>
                     )}
                     <div className="form-group" style={{ flex: 1 }}>
-                      <label className="form-label">Duration (months, blank = open)</label>
-                      <input type="number" min="1" className="form-input" value={subForm.duration_months} onChange={e => setSubForm(p => ({ ...p, duration_months: e.target.value }))} />
+                      <label className="form-label">Duration Mode</label>
+                      <select
+                        className="form-select"
+                        value={subForm.duration_mode}
+                        onChange={e => setSubForm(p => ({ ...p, duration_mode: e.target.value }))}
+                      >
+                        <option value="months">Months</option>
+                        <option value="days">Days</option>
+                      </select>
+                    </div>
+                    <div className="form-group" style={{ flex: 1 }}>
+                      <label className="form-label">{subForm.duration_mode === 'days' ? 'Duration (days)' : 'Duration (months)'}</label>
+                      <input
+                        type="number"
+                        min="1"
+                        className="form-input"
+                        value={subForm.duration_mode === 'days' ? subForm.duration_days : subForm.duration_months}
+                        onChange={e => setSubForm(p => (
+                          subForm.duration_mode === 'days'
+                            ? { ...p, duration_days: e.target.value }
+                            : { ...p, duration_months: e.target.value }
+                        ))}
+                      />
                     </div>
                   </div>
 
@@ -536,7 +695,7 @@ export function UserDetailDrawer({ userId, onClose }) {
                 </div>
               )}
               <MiniTable
-                columns={['Product', 'Freq', 'Qty', 'Status', 'Start', 'End']}
+                columns={['Product', 'Freq', 'Qty', 'Duration', 'Status', 'Start', 'End']}
                 rows={data.subscriptions}
                 empty="No subscriptions"
                 renderRow={(s) => (
@@ -544,6 +703,7 @@ export function UserDetailDrawer({ userId, onClose }) {
                     <td style={{ padding: '6px 8px', fontSize: 11.5 }}>{s.products?.name || '—'}</td>
                     <td style={{ padding: '6px 8px', fontSize: 11.5 }}>{s.frequency}</td>
                     <td style={{ padding: '6px 8px', fontSize: 11.5 }}>{s.quantity}</td>
+                    <td style={{ padding: '6px 8px', fontSize: 11.5 }}>{fmtDuration(s)}</td>
                     <td style={{ padding: '6px 8px' }}><StatusBadge status={s.status} /></td>
                     <td style={{ padding: '6px 8px', fontSize: 11.5 }}>{fmtDate(s.start_date)}</td>
                     <td style={{ padding: '6px 8px', fontSize: 11.5 }}>{fmtDate(s.end_date)}</td>

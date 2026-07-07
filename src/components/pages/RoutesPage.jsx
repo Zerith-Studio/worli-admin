@@ -6,7 +6,6 @@
 import React, { useState } from 'react';
 import { useRoutes } from '../../hooks/useRoutes';
 import { useRouteStops } from '../../hooks/useRouteStops';
-import { useDrivers } from '../../hooks/useDrivers';
 import { useDataRefresh } from '../../hooks/useDataRefresh';
 import { Button } from '../ui/Button';
 import { StatusBadge } from '../ui/StatusBadge';
@@ -272,15 +271,11 @@ function StopsDrawer({ route, onClose }) {
 
 // ─── Main Routes Page ──────────────────────────────────────────────────────────
 export function RoutesPage() {
-  const { routes, hubs, loading, error, saving, createRoute, updateRoute, toggleRouteActive, assignDriver, refresh } = useRoutes();
-  const { drivers } = useDrivers();
+  const { routes, hubs, loading, error, saving, createRoute, updateRoute, toggleRouteActive, refresh } = useRoutes();
   const [routeModal, setRouteModal] = useState(null); // null | { mode: 'create' | 'edit', route? }
   const [routeForm, setRouteForm] = useState(EMPTY_ROUTE_FORM);
   const [routeFormError, setRouteFormError] = useState('');
   const [stopsRoute, setStopsRoute] = useState(null); // route object whose stops drawer is open
-  const [assignModal, setAssignModal] = useState(null); // route object
-  const [selectedDriver, setSelectedDriver] = useState('');
-  const [assigning, setAssigning] = useState(false);
 
   useDataRefresh(refresh, 60000, true);
 
@@ -299,14 +294,6 @@ export function RoutesPage() {
       : await updateRoute(routeModal.route.id, payload);
     if (result.success) setRouteModal(null);
     else setRouteFormError(result.error);
-  };
-
-  const handleAssignSubmit = async () => {
-    if (!selectedDriver || !assignModal) return;
-    setAssigning(true);
-    await assignDriver(assignModal.id, selectedDriver);
-    setAssigning(false);
-    setAssignModal(null);
   };
 
   if (loading && routes.length === 0) {
@@ -367,7 +354,6 @@ export function RoutesPage() {
                       <Button size="sm" variant="primary" onClick={() => setStopsRoute(r)}>
                         📍 Stops
                       </Button>
-                      <Button size="sm" onClick={() => { setAssignModal(r); setSelectedDriver(r.driverId || ''); }}>Assign</Button>
                       <Button size="sm" onClick={() => openEdit(r)}>Edit</Button>
                       <Button size="sm"
                         style={{ color: r.isActive ? 'var(--red)' : 'var(--green)' }}
@@ -421,36 +407,6 @@ export function RoutesPage() {
             <input className="form-input" placeholder="Brief description of coverage area..."
               value={routeForm.description}
               onChange={e => setRouteForm(p => ({ ...p, description: e.target.value }))} />
-          </div>
-        </Modal>
-      )}
-
-      {/* Assign Driver modal */}
-      {assignModal && (
-        <Modal
-          title={`Assign Driver — ${assignModal.name}`}
-          onClose={() => setAssignModal(null)}
-          footer={
-            <>
-              <Button onClick={() => setAssignModal(null)}>Cancel</Button>
-              <Button variant="primary" onClick={handleAssignSubmit} disabled={assigning || !selectedDriver}>
-                {assigning ? 'Assigning...' : 'Assign Driver'}
-              </Button>
-            </>
-          }
-        >
-          <div className="form-group">
-            <label className="form-label">Select Driver for Today</label>
-            <select
-              className="form-select"
-              value={selectedDriver}
-              onChange={e => setSelectedDriver(e.target.value)}
-            >
-              <option value="">— Select a Driver —</option>
-              {drivers.filter(d => d.status === 'active').map(d => (
-                <option key={d.id} value={d.id}>{d.name} ({d.phone})</option>
-              ))}
-            </select>
           </div>
         </Modal>
       )}

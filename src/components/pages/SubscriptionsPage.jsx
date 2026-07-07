@@ -30,6 +30,13 @@ function fmtDate(iso) {
   return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
 }
 
+function fmtDuration(sub) {
+  if (sub.durationMonths && sub.durationDays) return `${sub.durationMonths}mo / ${sub.durationDays}d`;
+  if (sub.durationDays) return `${sub.durationDays}d`;
+  if (sub.durationMonths) return `${sub.durationMonths}mo`;
+  return '—';
+}
+
 export function SubscriptionsPage() {
   const {
     subscriptions, loading, error, page, totalPages, totalCount,
@@ -110,7 +117,7 @@ export function SubscriptionsPage() {
             </thead>
             <tbody>
               {subscriptions.length === 0 ? (
-                <tr><td colSpan={8} style={{ textAlign: 'center', padding: 24, color: 'var(--text-4)' }}>No subscriptions found</td></tr>
+                <tr><td colSpan={10} style={{ textAlign: 'center', padding: 24, color: 'var(--text-4)' }}>No subscriptions found</td></tr>
               ) : subscriptions.map(s => (
                 <tr key={s.id}>
                   <td>
@@ -129,7 +136,7 @@ export function SubscriptionsPage() {
                     )}
                   </td>
                   <td style={{ fontSize: 11.5, color: 'var(--text-3)' }}>
-                    {s.durationMonths ? `${s.durationMonths}mo` : '—'}
+                    {fmtDuration(s)}
                   </td>
                   <td style={{ fontSize: 11, color: 'var(--text-3)', whiteSpace: 'nowrap' }}>
                     {s.startDate ? fmtDate(s.startDate) : '—'}

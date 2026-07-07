@@ -178,7 +178,7 @@ export function CustomersPage() {
 
       {/* Unified customer sheet */}
       {viewUserId && (
-        <UserDetailDrawer userId={viewUserId} onClose={() => setViewUserId(null)} />
+        <UserDetailDrawer userId={viewUserId} onClose={() => setViewUserId(null)} onUserUpdated={() => refresh()} />
       )}
 
       {/* Create Customer Modal */}
