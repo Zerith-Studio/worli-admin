@@ -41,7 +41,13 @@ export function CustomersPage() {
   const [createForm, setCreateForm] = useState({ full_name: '', phone: '', email: '' });
   const [createState, setCreateState] = useState({ loading: false, error: null, success: null });
 
-  const handleCreateChange = (e) => setCreateForm(p => ({ ...p, [e.target.name]: e.target.value }));
+  const handleCreateChange = (e) => {
+    const { name, value } = e.target;
+    // Phone is digits-only. Without this, maxLength={10} counts *characters*, so
+    // typing "+91 9876543210" or "98765 43210" silently truncates the number.
+    const next = name === 'phone' ? value.replace(/\D/g, '').slice(0, 10) : value;
+    setCreateForm(p => ({ ...p, [name]: next }));
+  };
 
   const handleCreateSubmit = async () => {
     if (!createForm.full_name.trim() || !createForm.phone.trim()) {
@@ -50,6 +56,10 @@ export function CustomersPage() {
     }
     if (createForm.full_name.trim().length < 2) {
       setCreateState({ loading: false, error: 'Name must be at least 2 characters.', success: null });
+      return;
+    }
+    if (!/^[6-9]\d{9}$/.test(createForm.phone.trim())) {
+      setCreateState({ loading: false, error: 'Enter a valid 10-digit Indian mobile number (e.g. 9876543210).', success: null });
       return;
     }
     if (createForm.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(createForm.email.trim())) {

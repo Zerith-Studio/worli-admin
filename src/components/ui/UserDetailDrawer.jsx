@@ -160,8 +160,10 @@ export function UserDetailDrawer({ userId, onClose, onUserUpdated }) {
   useEffect(() => {
     if (!data?.user) return;
     setProfileForm({
+      // Edited as a bare 10-digit number behind a static +91, like every other
+      // phone input in the product. The stored value is E.164 (+91XXXXXXXXXX).
       full_name: data.user.full_name || '',
-      phone_number: data.user.phone_number || '',
+      phone_number: (data.user.phone_number || '').replace(/\D/g, '').slice(-10),
       email: data.user.email || '',
       is_active: data.user.is_active !== false,
     });
@@ -213,8 +215,8 @@ export function UserDetailDrawer({ userId, onClose, onUserUpdated }) {
       setProfileState({ loading: false, error: 'Full name must be at least 2 characters.', success: null });
       return;
     }
-    if (!phone) {
-      setProfileState({ loading: false, error: 'Phone number is required.', success: null });
+    if (!/^[6-9]\d{9}$/.test(phone)) {
+      setProfileState({ loading: false, error: 'Enter a valid 10-digit Indian mobile number (e.g. 9876543210).', success: null });
       return;
     }
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
@@ -231,7 +233,7 @@ export function UserDetailDrawer({ userId, onClose, onUserUpdated }) {
           payload: {
             id: userId,
             full_name: fullName,
-            phone_number: phone,
+            phone_number: `+91${phone}`,
             email: email || null,
             is_active: !!profileForm.is_active,
           },
@@ -444,8 +446,15 @@ export function UserDetailDrawer({ userId, onClose, onUserUpdated }) {
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                     <div className="form-group">
-                      <label className="form-label">Phone *</label>
-                      <input className="form-input" value={profileForm.phone_number} onChange={e => setProfileForm(p => ({ ...p, phone_number: e.target.value }))} />
+                      <label className="form-label">Phone * (10 digits, without +91)</label>
+                      <input
+                        className="form-input"
+                        value={profileForm.phone_number}
+                        placeholder="9876543210"
+                        maxLength={10}
+                        inputMode="numeric"
+                        onChange={e => setProfileForm(p => ({ ...p, phone_number: e.target.value.replace(/\D/g, '').slice(0, 10) }))}
+                      />
                     </div>
                     <div className="form-group">
                       <label className="form-label">Email</label>
