@@ -37,6 +37,19 @@ const fmtDuration = (sub) => {
   return '—';
 };
 
+// Mirrors the consumer app's edit cutoff: edits take effect from the next
+// deliverable date. Cutoff is 19:00 IST — past it, the soonest editable date is
+// two days out, otherwise tomorrow. If the sub's own start is still in the
+// future, that later date wins. Returns a YYYY-MM-DD string.
+const getEffectiveDate = (originalStartDate) => {
+  const nowIST = new Date(Date.now() + 5.5 * 3600 * 1000);
+  const base = new Date(nowIST);
+  base.setUTCHours(0, 0, 0, 0);
+  base.setUTCDate(base.getUTCDate() + (nowIST.getUTCHours() >= 19 ? 2 : 1));
+  const cutoff = base.toISOString().slice(0, 10);
+  return originalStartDate && originalStartDate > cutoff ? originalStartDate : cutoff;
+};
+
 function Row({ label, value }) {
   return (
     <div className="stat-row" style={{ alignItems: 'flex-start' }}>
@@ -92,12 +105,23 @@ export function UserDetailDrawer({ userId, onClose, onUserUpdated }) {
   const [subForm, setSubForm] = useState({ product_id: '', address_id: '', frequency: 'daily', quantity: '1', start_date: '', duration_mode: 'months', duration_months: '1', duration_days: '30', interval_days: '2', custom_quantities: { '0': 0, '1': 0, '2': 0, '3': 0, '4': 0, '5': 0, '6': 0 } });
   const [subState, setSubState] = useState({ loading: false, error: null, success: null });
 
+  // Edit Subscription state (mirrors the consumer edit + admin duration-in-days)
+  const [editSub, setEditSub] = useState(null);       // the subscription being edited
+  const [editForm, setEditForm] = useState(null);     // prefilled form values
+  const [editState, setEditState] = useState({ loading: false, error: null, success: null });
+
+  // Per-row actions on existing subs/orders: cancel + inline single-order qty edit.
+  const [rowBusyId, setRowBusyId] = useState(null);   // id of the sub/order mid-action
+  const [rowError, setRowError] = useState(null);     // error surfaced above the table
+  const [editOrderId, setEditOrderId] = useState(null); // order whose qty is being edited inline
+  const [editOrderQty, setEditOrderQty] = useState('1');
+
   // Create Address state
   const [addressForm, setAddressForm] = useState({ name: 'Home', address_line1: '', address_line2: '', floor_number: '', landmark: '', city: '', state: '', pincode: '', delivery_instructions: '', latitude: '', longitude: '' });
   const [addressState, setAddressState] = useState({ loading: false, error: null, success: null });
 
   // Wallet adjust state
-  const [walletForm, setWalletForm] = useState({ new_balance: '', create_txn: true, note: '' });
+  const [walletForm, setWalletForm] = useState({ new_balance: '', new_reserved: '', create_txn: true, note: '' });
   const [walletState, setWalletState] = useState({ loading: false, error: null, success: null });
   const [showWalletForm, setShowWalletForm] = useState(false);
 
@@ -183,25 +207,34 @@ export function UserDetailDrawer({ userId, onClose, onUserUpdated }) {
     }
     setOrderState({ loading: true, error: null, success: null });
     try {
-      const orderNum = `ADM-${Date.now().toString(36).toUpperCase()}`;
-      const payload = {
-        order_number: orderNum,
-        user_id: userId,
-        product_id: orderForm.product_id,
-        address_id: orderForm.address_id,
-        delivery_date: orderForm.delivery_date,
-        quantity: parseInt(orderForm.quantity) || 1,
-        amount: parseFloat(orderForm.amount) || 0,
-        status: 'scheduled',
-      };
-      
+      // Route through rpc_create_one_time_order: charges the customer's AVAILABLE
+      // balance (balance − reserved) immediately, reserves nothing, and errors if
+      // they're short. The amount is computed server-side from the product price,
+      // so it always matches what's charged (no arbitrary manual amount).
       const res = await supabase.functions.invoke('admin-db-action', {
-        body: { action: 'insert', table: 'orders', payload }
+        body: {
+          action: 'rpc', fn: 'rpc_create_one_time_order',
+          params: {
+            p_user_id: userId,
+            p_product_id: orderForm.product_id,
+            p_address_id: orderForm.address_id,
+            p_quantity: parseInt(orderForm.quantity) || 1,
+            p_delivery_date: orderForm.delivery_date,
+          },
+        },
       });
       if (res.error) await throwFunctionError(res.error, res.data);
-      if (res.data?.error) await throwFunctionError(null, res.data);
-      
-      setOrderState({ loading: false, error: null, success: `Order ${orderNum} created!` });
+      if (res.data?.error) {
+        const d = res.data.data;
+        if (d?.error === 'INSUFFICIENT_FUNDS') {
+          throw new Error(`Insufficient wallet balance. Short by ₹${Number(d.shortfall || 0).toFixed(2)}. Top up the wallet first.`);
+        }
+        await throwFunctionError(null, res.data);
+      }
+      const orderNum = res.data?.data?.order_number || res.data?.order_number || '';
+      setOrderState({ loading: false, error: null, success: `Order ${orderNum} created & charged!` });
+      setShowOrderForm(false);
+      setOrderForm({ product_id: '', address_id: '', delivery_date: '', quantity: '1', amount: '0' });
       fetchAll();
     } catch (err) { setOrderState({ loading: false, error: err.message, success: null }); }
   };
@@ -312,23 +345,171 @@ export function UserDetailDrawer({ userId, onClose, onUserUpdated }) {
     } catch (err) { setSubState({ loading: false, error: err.message, success: null }); }
   };
 
+  // Open the edit form prefilled from an existing subscription. Product and
+  // address are fixed (rpc_edit_subscription carries them over), so they are
+  // shown read-only. Duration mode is inferred: a plan with duration_months is
+  // a month plan; a days-only plan edits in days.
+  const openEditSub = (s) => {
+    const cq = { '0': 0, '1': 0, '2': 0, '3': 0, '4': 0, '5': 0, '6': 0 };
+    if (s.custom_quantities && typeof s.custom_quantities === 'object') {
+      for (const [k, v] of Object.entries(s.custom_quantities)) if (k in cq) cq[k] = Number(v) || 0;
+    }
+    const mode = s.duration_months ? 'months' : 'days';
+    setEditForm({
+      frequency: s.frequency || 'daily',
+      quantity: String(s.quantity || 1),
+      duration_mode: mode,
+      duration_months: String(s.duration_months || 1),
+      duration_days: String(s.duration_days || 30),
+      interval_days: String(s.interval_days || 2),
+      custom_quantities: cq,
+    });
+    setEditState({ loading: false, error: null, success: null });
+    setEditSub(s);
+    setShowSubForm(false);
+  };
+
+  const handleEditSubscription = async () => {
+    if (!editSub || !editForm) return;
+    const f = editForm;
+    const isBuyOnce = f.frequency === 'buy_once';
+    // Duration only applies to recurring plans; buy_once is a single delivery.
+    const durationMonths = !isBuyOnce && f.duration_mode === 'months' ? positiveInt(f.duration_months) : null;
+    const durationDays = !isBuyOnce && f.duration_mode === 'days' ? positiveInt(f.duration_days) : null;
+    if (!isBuyOnce && f.duration_mode === 'months' && !durationMonths) {
+      setEditState({ loading: false, error: 'Enter a valid positive month duration.', success: null }); return;
+    }
+    if (!isBuyOnce && f.duration_mode === 'days' && !durationDays) {
+      setEditState({ loading: false, error: 'Enter a valid positive day duration.', success: null }); return;
+    }
+    const quantity = positiveInt(f.quantity);
+    if (f.frequency !== 'custom' && !quantity) {
+      setEditState({ loading: false, error: 'Quantity must be at least 1.', success: null }); return;
+    }
+    const intervalDays = f.frequency === 'on_interval' ? positiveInt(f.interval_days) : null;
+    if (f.frequency === 'on_interval' && !intervalDays) {
+      setEditState({ loading: false, error: 'Interval must be at least 1 day.', success: null }); return;
+    }
+    const customQuantities = Object.fromEntries(
+      Object.entries(f.custom_quantities).map(([day, value]) => [day, Math.max(0, Number.parseInt(value, 10) || 0)])
+    );
+    if (f.frequency === 'custom' && !Object.values(customQuantities).some(v => v > 0)) {
+      setEditState({ loading: false, error: 'Set at least one custom day quantity greater than zero.', success: null }); return;
+    }
+    setEditState({ loading: true, error: null, success: null });
+    try {
+      // Same recreate-from-effective-date path as the consumer edit; the two
+      // trailing params let the admin change the length (days or months).
+      const params = {
+        p_old_sub_id: editSub.id,
+        p_user_id: userId,
+        p_effective_date: getEffectiveDate(editSub.start_date),
+        p_frequency: f.frequency,
+        p_quantity: quantity || 1,
+        p_interval_days: intervalDays,
+        p_custom_quantities: f.frequency === 'custom' ? customQuantities : null,
+        p_delivery_time: editSub.delivery_time || '05:00-07:00',
+        p_duration_days: durationDays,
+        p_duration_months: durationMonths,
+      };
+      const res = await supabase.functions.invoke('admin-db-action', {
+        body: { action: 'rpc', fn: 'rpc_edit_subscription', params }
+      });
+      if (res.error) await throwFunctionError(res.error, res.data);
+      if (res.data?.error) {
+        const d = res.data.data;
+        if (d?.error === 'INSUFFICIENT_FUNDS') {
+          throw new Error(`Insufficient wallet balance. Short by ₹${Number(d.shortfall || 0).toFixed(2)}. Top up the wallet first.`);
+        }
+        if (d?.error === 'INVALID_DURATION') throw new Error('The duration is not valid.');
+        if (d?.error === 'NO_DELIVERIES') throw new Error('These settings produce no deliveries in the period.');
+        await throwFunctionError(null, res.data);
+      }
+      setEditState({ loading: false, error: null, success: 'Subscription updated!' });
+      setTimeout(() => setEditSub(null), 1500);
+      fetchAll();
+    } catch (err) { setEditState({ loading: false, error: err.message, success: null }); }
+  };
+
+  // Cancel an active subscription. Cancels all future scheduled orders and
+  // refunds their reserved amount to the wallet (rpc_cancel_subscription).
+  const handleCancelSubscription = async (s) => {
+    if (!window.confirm(`Cancel this ${s.frequency} subscription?\n\nAll future scheduled orders will be cancelled and their reserved amount refunded to the wallet.`)) return;
+    setRowBusyId(s.id); setRowError(null);
+    try {
+      const res = await supabase.functions.invoke('admin-db-action', {
+        body: { action: 'rpc', fn: 'rpc_cancel_subscription', params: { p_sub_id: s.id, p_user_id: userId } }
+      });
+      if (res.error) await throwFunctionError(res.error, res.data);
+      if (res.data?.error) await throwFunctionError(null, res.data);
+      fetchAll();
+    } catch (err) { setRowError(err.message); }
+    finally { setRowBusyId(null); }
+  };
+
+  // Edit / cancel a single scheduled order via rpc_edit_single_order.
+  //   newQty === 0  → cancel the order (refunds its reserved amount)
+  //   newQty  >  0  → change quantity (recomputes amount, adjusts reservation)
+  const runOrderEdit = async (o, newQty) => {
+    setRowBusyId(o.id); setRowError(null);
+    try {
+      const res = await supabase.functions.invoke('admin-db-action', {
+        body: { action: 'rpc', fn: 'rpc_edit_single_order', params: { p_order_id: o.id, p_user_id: userId, p_new_quantity: newQty } }
+      });
+      if (res.error) await throwFunctionError(res.error, res.data);
+      if (res.data?.error) {
+        const d = res.data.data;
+        if (d?.error === 'INSUFFICIENT_FUNDS') {
+          throw new Error(`Insufficient wallet balance. Short by ₹${Number(d.shortfall || 0).toFixed(2)}. Top up the wallet first.`);
+        }
+        await throwFunctionError(null, res.data);
+      }
+      fetchAll();
+    } catch (err) { setRowError(err.message); }
+    finally { setRowBusyId(null); }
+  };
+
+  const startEditOrder = (o) => { setEditOrderId(o.id); setEditOrderQty(String(o.quantity || 1)); setRowError(null); };
+
+  const handleSaveOrderQty = async (o) => {
+    const qty = positiveInt(editOrderQty);
+    if (!qty) { setRowError('Quantity must be at least 1.'); return; }
+    await runOrderEdit(o, qty);
+    setEditOrderId(null);
+  };
+
+  const handleCancelOrder = async (o) => {
+    if (!window.confirm(`Cancel order ${o.order_number}?\n\nIts amount will be refunded to the customer's wallet.`)) return;
+    await runOrderEdit(o, 0);
+  };
+
   const handleAdjustWallet = async () => {
-    const newBal = parseFloat(walletForm.new_balance);
+    // Reserved defaults to the current wallet value; new_balance defaults to the
+    // current balance — so the admin can edit either field independently.
+    const newBal = walletForm.new_balance === '' ? Number(w?.balance || 0) : parseFloat(walletForm.new_balance);
     if (isNaN(newBal) || newBal < 0) {
       setWalletState({ loading: false, error: 'Enter a valid non-negative balance.', success: null }); return;
+    }
+    const reservedProvided = walletForm.new_reserved !== '';
+    const newReserved = reservedProvided ? parseFloat(walletForm.new_reserved) : null;
+    if (reservedProvided && (isNaN(newReserved) || newReserved < 0)) {
+      setWalletState({ loading: false, error: 'Enter a valid non-negative reserved amount.', success: null }); return;
+    }
+    if (reservedProvided && newBal < newReserved) {
+      setWalletState({ loading: false, error: `Balance (${money(newBal)}) cannot be below reserved (${money(newReserved)}).`, success: null }); return;
     }
     setWalletState({ loading: true, error: null, success: null });
     try {
       const res = await supabase.functions.invoke('admin-db-action', {
         body: {
           action: 'rpc', fn: 'rpc_admin_adjust_wallet',
-          params: { p_user_id: userId, p_new_balance: newBal, p_create_txn: walletForm.create_txn, p_note: walletForm.note || null },
+          params: { p_user_id: userId, p_new_balance: newBal, p_create_txn: walletForm.create_txn, p_note: walletForm.note || null, p_new_reserved: newReserved },
         },
       });
       if (res.error) await throwFunctionError(res.error, res.data);
       if (res.data?.error) await throwFunctionError(null, res.data);
-      setWalletState({ loading: false, error: null, success: `Balance updated to ${money(newBal)}.` });
-      setWalletForm({ new_balance: '', create_txn: true, note: '' });
+      setWalletState({ loading: false, error: null, success: `Wallet updated — balance ${money(newBal)}${reservedProvided ? `, reserved ${money(newReserved)}` : ''}.` });
+      setWalletForm({ new_balance: '', new_reserved: '', create_txn: true, note: '' });
       setTimeout(() => setShowWalletForm(false), 1200);
       fetchAll();
     } catch (err) { setWalletState({ loading: false, error: err.message, success: null }); }
@@ -536,6 +717,14 @@ export function UserDetailDrawer({ userId, onClose, onUserUpdated }) {
                       onChange={(e) => setWalletForm(f => ({ ...f, new_balance: e.target.value }))}
                       placeholder={`Current: ${money(w?.balance)}`}
                       style={{ padding: '6px 8px', borderRadius: 4, border: '1px solid var(--border)', fontSize: 13 }} />
+                    <label style={{ fontSize: 11, color: 'var(--text-3)' }}>Reserved balance (₹) — leave blank to keep</label>
+                    <input type="number" min="0" step="0.01" value={walletForm.new_reserved}
+                      onChange={(e) => setWalletForm(f => ({ ...f, new_reserved: e.target.value }))}
+                      placeholder={`Current: ${money(w?.reserved_balance)}`}
+                      style={{ padding: '6px 8px', borderRadius: 4, border: '1px solid var(--border)', fontSize: 13 }} />
+                    <div style={{ fontSize: 10.5, color: 'var(--text-4)' }}>
+                      Reserved is the sum of scheduled subscription orders. Only override it to correct drift.
+                    </div>
                     <input type="text" value={walletForm.note}
                       onChange={(e) => setWalletForm(f => ({ ...f, note: e.target.value }))}
                       placeholder="Note (optional, shown in transaction)"
@@ -703,8 +892,91 @@ export function UserDetailDrawer({ userId, onClose, onUserUpdated }) {
                   </button>
                 </div>
               )}
+              {editSub && editForm && (
+                <div style={{ background: 'var(--bg)', border: '1px solid var(--accent)', borderRadius: 8, padding: 14, marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <strong style={{ fontSize: 13 }}>Edit subscription — {editSub.products?.name || 'Product'}</strong>
+                    <button onClick={() => setEditSub(null)} style={{ fontSize: 11, padding: '4px 10px', borderRadius: 4, background: 'var(--border)', color: 'var(--text-2)', border: 'none', cursor: 'pointer' }}>Cancel</button>
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-3)' }}>
+                    Product &amp; address stay the same. Changes take effect from <strong>{fmtDate(getEffectiveDate(editSub.start_date))}</strong> (the next deliverable date); remaining orders are re-reserved from the wallet.
+                  </div>
+                  <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                    <div className="form-group" style={{ flex: 1, minWidth: 120 }}>
+                      <label className="form-label">Frequency</label>
+                      <select className="form-select" value={editForm.frequency} onChange={e => setEditForm(p => ({ ...p, frequency: e.target.value }))}>
+                        <option value="daily">Daily</option>
+                        <option value="on_interval">On Interval</option>
+                        <option value="custom">Custom</option>
+                        <option value="buy_once">Buy Once</option>
+                      </select>
+                    </div>
+                    {editForm.frequency === 'on_interval' && (
+                      <div className="form-group" style={{ flex: 1, minWidth: 120 }}>
+                        <label className="form-label">Repeat Once In</label>
+                        <select className="form-select" value={editForm.interval_days} onChange={e => setEditForm(p => ({ ...p, interval_days: e.target.value }))}>
+                          <option value="2">2 Days</option>
+                          <option value="3">3 Days</option>
+                          <option value="4">4 Days</option>
+                        </select>
+                      </div>
+                    )}
+                    {editForm.frequency !== 'custom' && (
+                      <div className="form-group" style={{ flex: 1, minWidth: 100 }}>
+                        <label className="form-label">Quantity</label>
+                        <input type="number" min="1" className="form-input" value={editForm.quantity} onChange={e => setEditForm(p => ({ ...p, quantity: e.target.value }))} />
+                      </div>
+                    )}
+                    {editForm.frequency !== 'buy_once' && (
+                      <>
+                        <div className="form-group" style={{ flex: 1, minWidth: 110 }}>
+                          <label className="form-label">Duration Mode</label>
+                          <select className="form-select" value={editForm.duration_mode} onChange={e => setEditForm(p => ({ ...p, duration_mode: e.target.value }))}>
+                            <option value="months">Months</option>
+                            <option value="days">Days</option>
+                          </select>
+                        </div>
+                        <div className="form-group" style={{ flex: 1, minWidth: 110 }}>
+                          <label className="form-label">{editForm.duration_mode === 'days' ? 'Duration (days)' : 'Duration (months)'}</label>
+                          <input type="number" min="1" className="form-input"
+                            value={editForm.duration_mode === 'days' ? editForm.duration_days : editForm.duration_months}
+                            onChange={e => setEditForm(p => (editForm.duration_mode === 'days' ? { ...p, duration_days: e.target.value } : { ...p, duration_months: e.target.value }))}
+                          />
+                        </div>
+                      </>
+                    )}
+                  </div>
+
+                  {editForm.frequency === 'custom' && (
+                    <div className="form-group">
+                      <label className="form-label">Custom Quantities (Per Day)</label>
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                        {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day, idx) => (
+                          <div key={idx} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', background: 'var(--blue-bg)', padding: '6px 8px', borderRadius: 6, flex: 1, minWidth: 40 }}>
+                            <span style={{ fontSize: 10, color: 'var(--text-3)', marginBottom: 4, fontWeight: 600 }}>{day}</span>
+                            <input type="number" min="0" style={{ width: '100%', textAlign: 'center', padding: '4px', border: '1px solid var(--border)', borderRadius: 4, fontSize: 12 }}
+                              value={editForm.custom_quantities[String(idx)]}
+                              onChange={e => setEditForm(p => ({ ...p, custom_quantities: { ...p.custom_quantities, [String(idx)]: parseInt(e.target.value) || 0 } }))}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {editState.error && <div style={{ padding: '8px 12px', background: 'var(--red-bg)', color: 'var(--red)', borderRadius: 6, fontSize: 12 }}>{editState.error}</div>}
+                  {editState.success && <div style={{ padding: '8px 12px', background: 'var(--green-bg)', color: 'var(--green)', borderRadius: 6, fontSize: 12 }}>✓ {editState.success}</div>}
+                  <button
+                    style={{ alignSelf: 'flex-start', padding: '8px 18px', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 6, cursor: editState.loading ? 'not-allowed' : 'pointer', fontSize: 13, fontWeight: 600, opacity: editState.loading ? 0.7 : 1 }}
+                    onClick={handleEditSubscription} disabled={editState.loading}
+                  >
+                    {editState.loading ? 'Saving...' : 'Save Changes'}
+                  </button>
+                </div>
+              )}
+              {rowError && <div style={{ padding: '8px 12px', background: 'var(--red-bg)', color: 'var(--red)', borderRadius: 6, fontSize: 12, marginBottom: 10 }}>{rowError}</div>}
               <MiniTable
-                columns={['Product', 'Freq', 'Qty', 'Duration', 'Status', 'Start', 'End']}
+                columns={['Product', 'Freq', 'Qty', 'Duration', 'Status', 'Start', 'End', '']}
                 rows={data.subscriptions}
                 empty="No subscriptions"
                 renderRow={(s) => (
@@ -716,6 +988,14 @@ export function UserDetailDrawer({ userId, onClose, onUserUpdated }) {
                     <td style={{ padding: '6px 8px' }}><StatusBadge status={s.status} /></td>
                     <td style={{ padding: '6px 8px', fontSize: 11.5 }}>{fmtDate(s.start_date)}</td>
                     <td style={{ padding: '6px 8px', fontSize: 11.5 }}>{fmtDate(s.end_date)}</td>
+                    <td style={{ padding: '6px 8px', fontSize: 11.5, textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      {s.status === 'active' && (
+                        <>
+                          <button onClick={() => openEditSub(s)} disabled={rowBusyId === s.id} style={{ fontSize: 11, padding: '3px 10px', borderRadius: 4, background: 'var(--accent)', color: '#fff', border: 'none', cursor: rowBusyId === s.id ? 'not-allowed' : 'pointer' }}>Edit</button>
+                          <button onClick={() => handleCancelSubscription(s)} disabled={rowBusyId === s.id} style={{ fontSize: 11, padding: '3px 10px', borderRadius: 4, background: 'var(--red-bg)', color: 'var(--red)', border: '1px solid var(--red)', cursor: rowBusyId === s.id ? 'not-allowed' : 'pointer', marginLeft: 6 }}>{rowBusyId === s.id ? '…' : 'Cancel'}</button>
+                        </>
+                      )}
+                    </td>
                   </tr>
                 )}
               />
@@ -760,9 +1040,18 @@ export function UserDetailDrawer({ userId, onClose, onUserUpdated }) {
                       <input type="number" min="1" className="form-input" value={orderForm.quantity} onChange={e => setOrderForm(p => ({ ...p, quantity: e.target.value }))} />
                     </div>
                     <div className="form-group" style={{ flex: 1 }}>
-                      <label className="form-label">Amount (₹)</label>
-                      <input type="number" min="0" className="form-input" value={orderForm.amount} onChange={e => setOrderForm(p => ({ ...p, amount: e.target.value }))} />
+                      <label className="form-label">Amount (auto)</label>
+                      <div className="form-input" style={{ display: 'flex', alignItems: 'center', background: 'var(--bg)', color: 'var(--text-2)' }}>
+                        {(() => {
+                          const price = Number(products.find(p => p.id === orderForm.product_id)?.price || 0);
+                          const qty = parseInt(orderForm.quantity) || 0;
+                          return price && qty ? money(price * qty) : '—';
+                        })()}
+                      </div>
                     </div>
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-3)' }}>
+                    Charged immediately from the customer's available balance (balance − reserved). Fails if they're short.
                   </div>
                   {orderState.error && <div style={{ padding: '8px 12px', background: 'var(--red-bg)', color: 'var(--red)', borderRadius: 6, fontSize: 12 }}>{orderState.error}</div>}
                   {orderState.success && <div style={{ padding: '8px 12px', background: 'var(--green-bg)', color: 'var(--green)', borderRadius: 6, fontSize: 12 }}>✓ {orderState.success}</div>}
@@ -774,20 +1063,43 @@ export function UserDetailDrawer({ userId, onClose, onUserUpdated }) {
                   </button>
                 </div>
               )}
+              {rowError && <div style={{ padding: '8px 12px', background: 'var(--red-bg)', color: 'var(--red)', borderRadius: 6, fontSize: 12, marginBottom: 10 }}>{rowError}</div>}
               <MiniTable
-                columns={['Order', 'Date', 'Product', 'Qty', 'Amount', 'Status']}
+                columns={['Order', 'Date', 'Product', 'Qty', 'Amount', 'Status', '']}
                 rows={data.orders}
                 empty="No orders"
-                renderRow={(o) => (
+                renderRow={(o) => {
+                  const editing = editOrderId === o.id;
+                  const busy = rowBusyId === o.id;
+                  return (
                   <tr key={o.id}>
                     <td style={{ padding: '6px 8px', fontSize: 11, fontFamily: "'DM Mono',monospace", color: 'var(--text-3)' }}>{o.order_number}</td>
                     <td style={{ padding: '6px 8px', fontSize: 11.5 }}>{fmtDate(o.delivery_date)}</td>
                     <td style={{ padding: '6px 8px', fontSize: 11.5 }}>{o.products?.name || '—'}</td>
-                    <td style={{ padding: '6px 8px', fontSize: 11.5 }}>{o.quantity}</td>
+                    <td style={{ padding: '6px 8px', fontSize: 11.5 }}>
+                      {editing ? (
+                        <input type="number" min="1" value={editOrderQty} onChange={e => setEditOrderQty(e.target.value)}
+                          style={{ width: 56, padding: '2px 6px', fontSize: 11.5, border: '1px solid var(--border)', borderRadius: 4 }} />
+                      ) : o.quantity}
+                    </td>
                     <td style={{ padding: '6px 8px', fontSize: 11.5, fontFamily: "'DM Mono',monospace" }}>{money(o.amount)}</td>
                     <td style={{ padding: '6px 8px' }}><StatusBadge status={o.status} /></td>
+                    <td style={{ padding: '6px 8px', fontSize: 11.5, textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      {o.status === 'scheduled' && (editing ? (
+                        <>
+                          <button onClick={() => handleSaveOrderQty(o)} disabled={busy} style={{ fontSize: 11, padding: '3px 10px', borderRadius: 4, background: 'var(--accent)', color: '#fff', border: 'none', cursor: busy ? 'not-allowed' : 'pointer' }}>{busy ? '…' : 'Save'}</button>
+                          <button onClick={() => setEditOrderId(null)} disabled={busy} style={{ fontSize: 11, padding: '3px 10px', borderRadius: 4, background: 'transparent', color: 'var(--text-3)', border: '1px solid var(--border)', cursor: 'pointer', marginLeft: 6 }}>✕</button>
+                        </>
+                      ) : (
+                        <>
+                          <button onClick={() => startEditOrder(o)} disabled={busy} style={{ fontSize: 11, padding: '3px 10px', borderRadius: 4, background: 'var(--accent)', color: '#fff', border: 'none', cursor: busy ? 'not-allowed' : 'pointer' }}>Edit</button>
+                          <button onClick={() => handleCancelOrder(o)} disabled={busy} style={{ fontSize: 11, padding: '3px 10px', borderRadius: 4, background: 'var(--red-bg)', color: 'var(--red)', border: '1px solid var(--red)', cursor: busy ? 'not-allowed' : 'pointer', marginLeft: 6 }}>{busy ? '…' : 'Cancel'}</button>
+                        </>
+                      ))}
+                    </td>
                   </tr>
-                )}
+                  );
+                }}
               />
               <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-4)', textAlign: 'center' }}>
                 Showing latest {data.orders.length} of {data.totalOrders} total orders

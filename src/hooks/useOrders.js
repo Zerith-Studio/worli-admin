@@ -246,6 +246,33 @@ export function useOrders() {
     [fetchOrders],
   )
 
+  // Edit or cancel a single scheduled order via rpc_edit_single_order (routed
+  // through the admin-db-action edge function). newQty === 0 cancels the order
+  // and refunds its reserved amount; newQty > 0 changes quantity and adjusts the
+  // wallet reservation (may fail with INSUFFICIENT_FUNDS).
+  const editSingleOrder = useCallback(
+    async (id, customerId, newQty) => {
+      try {
+        const res = await supabase.functions.invoke("admin-db-action", {
+          body: { action: "rpc", fn: "rpc_edit_single_order", params: { p_order_id: id, p_user_id: customerId, p_new_quantity: newQty } },
+        })
+        if (res.error) await throwFunctionError(res.error, res.data)
+        if (res.data?.error) {
+          const d = res.data.data
+          if (d?.error === "INSUFFICIENT_FUNDS") {
+            throw new Error(`Insufficient wallet balance. Short by ₹${Number(d.shortfall || 0).toFixed(2)}. Top up the wallet first.`)
+          }
+          await throwFunctionError(null, res.data)
+        }
+        await fetchOrders()
+        return { success: true }
+      } catch (err) {
+        return { success: false, error: err.message }
+      }
+    },
+    [fetchOrders],
+  )
+
   const autoAssignOrders = useCallback(async (date) => {
     try {
       const [orderRes, returnRes] = await Promise.all([
@@ -289,6 +316,7 @@ export function useOrders() {
     updateOrderNotes,
     reassignDriver,
     retryOrder,
+    editSingleOrder,
     autoAssignOrders,
     refresh: fetchOrders,
   }

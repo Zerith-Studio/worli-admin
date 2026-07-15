@@ -21,8 +21,9 @@ export function AddressesPage() {
   const [sortField, setSortField] = useState("created_at")
   const [sortDir, setSortDir] = useState("desc")
 
-  // Route-stop assignment panel
-  const [assignTarget, setAssignTarget] = useState(null) // address object
+  // Route-stop assignment panel — selection is a Set of address ids. The panel
+  // acts on every selected address at once (bulk assign to the same stop).
+  const [selectedIds, setSelectedIds] = useState(() => new Set())
 
   // Cascaded hub → route → stop data
   const [hubs, setHubs] = useState([])
@@ -120,35 +121,65 @@ export function AddressesPage() {
     return <span style={{ fontSize: 10 }}>{sortDir === "asc" ? "↑" : "↓"}</span>
   }
 
-  // ── Route-stop assignment ────────────────────────────────────────────────────
-  const openAssign = (addr) => {
-    setAssignTarget(addr)
+  // ── Selection ────────────────────────────────────────────────────────────────
+  const selectedAddresses = addresses.filter(a => selectedIds.has(a.id))
+  const anySelectedHasStop = selectedAddresses.some(a => a.route_stop_id)
+
+  const resetCascade = () => { setAssignHub(""); setAssignRoute(""); setAssignStop("") }
+
+  // Toggle one row's checkbox. Never pre-fills the cascade — a multi-select can
+  // span addresses with different existing stops, so we start the panel blank.
+  const toggleSelect = (addr) => {
     setAssignMsg(null)
-    // Pre-fill cascades if address already has a stop assigned
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(addr.id)) next.delete(addr.id)
+      else next.add(addr.id)
+      if (next.size === 0) resetCascade()
+      return next
+    })
+  }
+
+  // Select-all on the current page.
+  const allOnPageSelected = addresses.length > 0 && addresses.every(a => selectedIds.has(a.id))
+  const toggleSelectAll = () => {
+    setAssignMsg(null)
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (allOnPageSelected) { addresses.forEach(a => next.delete(a.id)); resetCascade() }
+      else addresses.forEach(a => next.add(a.id))
+      return next
+    })
+  }
+
+  const clearSelection = () => { setSelectedIds(new Set()); resetCascade(); setAssignMsg(null) }
+
+  // Row "Assign / Change Stop" button — selects just this one address and
+  // pre-fills the cascade from its current stop for a quick single edit.
+  const openAssign = (addr) => {
+    setAssignMsg(null)
+    setSelectedIds(new Set([addr.id]))
     if (addr.route_stops) {
-      const routeId = addr.route_stops.route_id
-      const hubId = addr.route_stops.routes?.hub_id
-      setAssignHub(hubId || "")
-      setAssignRoute(routeId || "")
+      setAssignHub(addr.route_stops.routes?.hub_id || "")
+      setAssignRoute(addr.route_stops.route_id || "")
       setAssignStop(addr.route_stop_id || "")
     } else {
-      setAssignHub("")
-      setAssignRoute("")
-      setAssignStop("")
+      resetCascade()
     }
   }
 
   const handleSaveStop = async () => {
-    if (!assignTarget) return
+    const ids = [...selectedIds]
+    if (ids.length === 0) return
     setAssigning(true)
     setAssignMsg(null)
     try {
       const { error: err } = await supabase
         .from("addresses")
         .update({ route_stop_id: assignStop || null })
-        .eq("id", assignTarget.id)
+        .in("id", ids)
       if (err) throw err
-      setAssignMsg({ type: "success", text: "Stop assigned ✓" })
+      setAssignMsg({ type: "success", text: `Stop assigned to ${ids.length} address${ids.length > 1 ? "es" : ""} ✓` })
       fetchAddresses()
     } catch (e) {
       setAssignMsg({ type: "error", text: e.message })
@@ -158,15 +189,16 @@ export function AddressesPage() {
   }
 
   const handleClearStop = async () => {
-    if (!assignTarget) return
+    const ids = [...selectedIds]
+    if (ids.length === 0) return
     setAssigning(true)
     try {
       const { error: err } = await supabase
         .from("addresses")
         .update({ route_stop_id: null })
-        .eq("id", assignTarget.id)
+        .in("id", ids)
       if (err) throw err
-      setAssignMsg({ type: "success", text: "Stop cleared ✓" })
+      setAssignMsg({ type: "success", text: `Stop cleared for ${ids.length} address${ids.length > 1 ? "es" : ""} ✓` })
       setAssignStop("")
       fetchAddresses()
     } catch (e) {
@@ -223,6 +255,11 @@ export function AddressesPage() {
               <table className="data-table">
                 <thead>
                   <tr>
+                    <th style={{ width: 36, textAlign: "center" }}>
+                      <input type="checkbox" checked={allOnPageSelected}
+                        onChange={toggleSelectAll} title="Select all on this page"
+                        style={{ cursor: "pointer" }} />
+                    </th>
                     <th onClick={() => handleSort("users.full_name")} style={{ cursor: "pointer" }}>
                       User <SortIcon field="users.full_name" />
                     </th>
@@ -241,15 +278,20 @@ export function AddressesPage() {
                 </thead>
                 <tbody>
                   {addresses.length === 0 && (
-                    <tr><td colSpan={6} style={{ textAlign: "center", color: "var(--text-3)", padding: 32 }}>No addresses found</td></tr>
+                    <tr><td colSpan={7} style={{ textAlign: "center", color: "var(--text-3)", padding: 32 }}>No addresses found</td></tr>
                   )}
                   {addresses.map(addr => {
                     const stop = addr.route_stops
-                    const isActive = assignTarget?.id === addr.id
+                    const isActive = selectedIds.has(addr.id)
                     return (
                       <tr key={addr.id} style={{
                         background: isActive ? "var(--accent-subtle, rgba(99,102,241,0.08))" : undefined,
                       }}>
+                        <td style={{ textAlign: "center" }}>
+                          <input type="checkbox" checked={isActive}
+                            onChange={() => toggleSelect(addr)}
+                            style={{ cursor: "pointer" }} />
+                        </td>
                         <td>
                           <UserNameLink userId={addr.user_id} name={addr.users?.full_name} phone={addr.users?.phone_number} />
                           {addr.name && <div style={{ fontSize: 10.5, color: 'var(--accent)', fontWeight: 500, marginTop: 2 }}>{addr.name}</div>}
@@ -308,17 +350,25 @@ export function AddressesPage() {
         </div>
 
         {/* ── Assignment Panel ────────────────────────────────────────────── */}
-        {assignTarget && (
+        {selectedIds.size > 0 && (
           <div className="card" style={{ width: 300, flexShrink: 0, position: "sticky", top: 80 }}>
-            <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>Assign Route Stop</div>
-            <div style={{ fontSize: 11.5, color: "var(--text-3)", marginBottom: 4 }}>
-              {assignTarget.name ? <strong>{assignTarget.name}</strong> : null}
-              {assignTarget.name ? ' · ' : ''}{assignTarget.address_line1}{assignTarget.city ? `, ${assignTarget.city}` : ""}
-              {assignTarget.floor_number ? ` · Floor: ${assignTarget.floor_number}` : ""}
+            <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>
+              {selectedIds.size === 1 ? "Assign Route Stop" : `Assign ${selectedIds.size} Addresses`}
             </div>
-            {assignTarget.delivery_instructions && (
+            {selectedAddresses.length === 1 ? (
+              <div style={{ fontSize: 11.5, color: "var(--text-3)", marginBottom: 4 }}>
+                {selectedAddresses[0].name ? <strong>{selectedAddresses[0].name}</strong> : null}
+                {selectedAddresses[0].name ? ' · ' : ''}{selectedAddresses[0].address_line1}{selectedAddresses[0].city ? `, ${selectedAddresses[0].city}` : ""}
+                {selectedAddresses[0].floor_number ? ` · Floor: ${selectedAddresses[0].floor_number}` : ""}
+              </div>
+            ) : (
+              <div style={{ fontSize: 11.5, color: "var(--text-3)", marginBottom: 8 }}>
+                {selectedIds.size} addresses selected — the chosen stop is applied to all of them.
+              </div>
+            )}
+            {selectedAddresses.length === 1 && selectedAddresses[0].delivery_instructions && (
               <div style={{ fontSize: 11, color: 'var(--yellow)', background: 'var(--yellow-bg)', borderRadius: 5, padding: '5px 10px', marginBottom: 10 }}>
-                📋 {assignTarget.delivery_instructions}
+                📋 {selectedAddresses[0].delivery_instructions}
               </div>
             )}
 
@@ -381,12 +431,12 @@ export function AddressesPage() {
                 onClick={handleSaveStop} style={{ flex: 1 }}>
                 {assigning ? "Saving…" : "Save"}
               </Button>
-              {assignTarget.route_stop_id && (
+              {anySelectedHasStop && (
                 <Button variant="secondary" disabled={assigning}
                   onClick={handleClearStop}
                   style={{ color: "var(--red)" }}>Clear</Button>
               )}
-              <Button variant="secondary" onClick={() => setAssignTarget(null)}>✕</Button>
+              <Button variant="secondary" onClick={clearSelection}>✕</Button>
             </div>
           </div>
         )}

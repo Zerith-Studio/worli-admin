@@ -35,6 +35,7 @@ export function OrdersPage() {
     updateOrderStatus,
     reassignDriver,
     retryOrder,
+    editSingleOrder,
     autoAssignOrders,
     refresh,
   } = useOrders();
@@ -55,6 +56,10 @@ export function OrdersPage() {
   const [reassigning, setReassigning] = useState(false);
   const [autoAssigning, setAutoAssigning] = useState(false);
   const [assignResult, setAssignResult] = useState(null); // { ordersAssigned, returnsAssigned } | null
+  const [editModal, setEditModal] = useState(null); // scheduled order being edited/cancelled
+  const [editQty, setEditQty] = useState('1');
+  const [editBusy, setEditBusy] = useState(false);
+  const [editMsg, setEditMsg] = useState(null);
 
   useDataRefresh(refresh, 60000, true);
 
@@ -99,6 +104,44 @@ export function OrdersPage() {
       setTimeout(() => setFailModal(null), 1200);
     } else {
       setRetryMsg({ ok: false, text: result.error });
+    }
+  };
+
+  const openEditModal = (o) => {
+    setEditModal(o);
+    setEditQty(String(o.quantity || 1));
+    setEditMsg(null);
+  };
+
+  const handleSaveEditQty = async () => {
+    if (!editModal) return;
+    const qty = parseInt(editQty, 10);
+    if (!Number.isFinite(qty) || qty < 1) {
+      setEditMsg({ ok: false, text: 'Quantity must be at least 1.' });
+      return;
+    }
+    setEditBusy(true);
+    const result = await editSingleOrder(editModal.id, editModal.customerId, qty);
+    setEditBusy(false);
+    if (result.success) {
+      setEditMsg({ ok: true, text: `Order updated to ×${qty} ✓` });
+      setTimeout(() => setEditModal(null), 1000);
+    } else {
+      setEditMsg({ ok: false, text: result.error });
+    }
+  };
+
+  const handleCancelOrderInModal = async () => {
+    if (!editModal) return;
+    if (!window.confirm(`Cancel order ${editModal.orderNumber}?\n\nIts reserved amount will be refunded to the customer's wallet.`)) return;
+    setEditBusy(true);
+    const result = await editSingleOrder(editModal.id, editModal.customerId, 0);
+    setEditBusy(false);
+    if (result.success) {
+      setEditMsg({ ok: true, text: 'Order cancelled & refunded ✓' });
+      setTimeout(() => setEditModal(null), 1000);
+    } else {
+      setEditMsg({ ok: false, text: result.error });
     }
   };
 
@@ -269,12 +312,17 @@ export function OrdersPage() {
                         </Button>
                       )}
                       {(o.status === "scheduled" || o.status === "pending" || o.status === "in_transit") && (
-                        <Button 
-                          size="sm" 
+                        <Button
+                          size="sm"
                           variant="primary"
                           onClick={() => handleMarkDelivered(o)}
                         >
                           Mark Delivered
+                        </Button>
+                      )}
+                      {o.status === "scheduled" && (
+                        <Button size="sm" onClick={() => openEditModal(o)}>
+                          Edit / Cancel
                         </Button>
                       )}
                     </div>
@@ -476,6 +524,58 @@ export function OrdersPage() {
           {deliverMsg && (
             <div style={{ marginTop: 12, padding: '8px 12px', borderRadius: 6, background: 'var(--red-bg)', color: 'var(--red)', fontSize: 13 }}>
               {deliverMsg.text}
+            </div>
+          )}
+        </Modal>
+      )}
+
+      {/* EDIT / CANCEL ORDER MODAL (scheduled orders only) */}
+      {editModal && (
+        <Modal
+          title={`Edit Order — ${editModal.orderNumber}`}
+          onClose={() => setEditModal(null)}
+          footer={
+            <>
+              <Button onClick={() => setEditModal(null)} disabled={editBusy}>Close</Button>
+              <Button
+                onClick={handleCancelOrderInModal}
+                disabled={editBusy}
+                style={{ color: 'var(--red)', borderColor: 'var(--red)' }}
+              >
+                Cancel Order
+              </Button>
+              <Button variant="primary" onClick={handleSaveEditQty} disabled={editBusy}>
+                {editBusy ? 'Saving…' : 'Save Quantity'}
+              </Button>
+            </>
+          }
+        >
+          <div style={{ fontSize: 13, marginBottom: 14 }}>
+            <strong>Customer:</strong> {editModal.customerName}<br />
+            <strong>Product:</strong> {editModal.productName} {editModal.productUnit}<br />
+            <strong>Date:</strong> {editModal.date}
+          </div>
+          <div className="form-group">
+            <label className="form-label">Quantity</label>
+            <input
+              type="number"
+              min="1"
+              className="form-input"
+              value={editQty}
+              onChange={e => setEditQty(e.target.value)}
+              style={{ maxWidth: 120 }}
+            />
+          </div>
+          <div style={{ padding: '10px 12px', background: 'var(--bg)', borderRadius: 7, fontSize: 12, color: 'var(--text-3)', marginTop: 4 }}>
+            ℹ️ Changing the quantity recomputes the amount and adjusts the reserved wallet balance. <strong>Cancel Order</strong> cancels this delivery and refunds its reserved amount.
+          </div>
+          {editMsg && (
+            <div style={{
+              marginTop: 12, padding: '8px 12px', borderRadius: 6, fontSize: 13,
+              background: editMsg.ok ? 'rgba(34,197,94,0.1)' : 'var(--red-bg)',
+              color: editMsg.ok ? 'var(--green)' : 'var(--red)',
+            }}>
+              {editMsg.text}
             </div>
           )}
         </Modal>
