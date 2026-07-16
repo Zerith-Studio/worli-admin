@@ -6,6 +6,13 @@ import { LoadingSpinner } from "../ui/LoadingSpinner"
 import { UserNameLink } from "../ui/UserNameLink"
 
 const PAGE_SIZE = 20
+// Ceiling on how many customers a name/phone search resolves to before it feeds an
+// `in.(…)` list. Far above any realistic match count, and keeps the request URL sane.
+const USER_MATCH_LIMIT = 1000
+
+// Quote a value for use inside a PostgREST `or()` logic tree. Unquoted values break
+// the tree on `,` `.` `(` `)` — all of which a user can type into the search box.
+const orLiteral = (v) => `"${String(v).replace(/["\\]/g, (c) => "\\" + c)}"`
 
 // ─── Component ─────────────────────────────────────────────────────────────────
 export function AddressesPage() {
@@ -75,12 +82,30 @@ export function AddressesPage() {
           { count: "exact" }
         )
 
-      // Search: match on user name, phone, address line, city, pincode
+      // Search: match on user name, phone, address line, city, pincode.
+      // PostgREST cannot OR a column of this table against a column of an embedded
+      // one (users.full_name) inside a single logic tree — it rejects the whole
+      // filter ("failed to parse logic tree"). So the customer half of the search is
+      // resolved to user ids first, and OR'd in as addresses.user_id.
       if (search.trim()) {
         const s = search.trim()
-        query = query.or(
-          `address_line1.ilike.%${s}%,city.ilike.%${s}%,pincode.ilike.%${s}%,users.full_name.ilike.%${s}%`
-        )
+        const clauses = [
+          `address_line1.ilike.${orLiteral(`%${s}%`)}`,
+          `city.ilike.${orLiteral(`%${s}%`)}`,
+          `pincode.ilike.${orLiteral(`%${s}%`)}`,
+        ]
+
+        const { data: matchedUsers, error: userErr } = await supabase
+          .from("users")
+          .select("id")
+          .or(`full_name.ilike.${orLiteral(`%${s}%`)},phone_number.ilike.${orLiteral(`%${s}%`)}`)
+          .limit(USER_MATCH_LIMIT)
+        if (userErr) throw userErr
+        if (matchedUsers?.length) {
+          clauses.push(`user_id.in.(${matchedUsers.map(u => u.id).join(",")})`)
+        }
+
+        query = query.or(clauses.join(","))
       }
 
       // Stop filter
