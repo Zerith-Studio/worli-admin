@@ -4,13 +4,26 @@ import { Badge } from "../ui/Badge"
 import { Button } from "../ui/Button"
 import { LoadingSpinner } from "../ui/LoadingSpinner"
 import { Modal } from "../ui/Modal"
+import { LoadMore } from "../ui/LoadMore"
+import { RowsPerLoad } from "../ui/RowsPerLoad"
+import { usePaginatedQuery } from "../../hooks/usePaginatedQuery"
 
 export function DiscountsPage() {
-  const [loading, setLoading] = useState(true)
-  const [discounts, setDiscounts] = useState([])
   const [products, setProducts] = useState([])
-  const [error, setError] = useState(null)
-  
+
+  const {
+    rows: discounts,
+    loading,
+    error,
+    totalCount, loadingMore, loadMore,
+    refresh: fetchDiscounts,
+  } = usePaginatedQuery({
+    table: "discounts",
+    select: "*",
+    orderBy: { column: "created_at", ascending: false },
+  })
+
+
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [currentDiscount, setCurrentDiscount] = useState(null)
   const [formData, setFormData] = useState(getInitialFormData())
@@ -35,7 +48,6 @@ export function DiscountsPage() {
   }
 
   useEffect(() => {
-    fetchDiscounts()
     fetchProducts()
   }, [])
 
@@ -46,23 +58,6 @@ export function DiscountsPage() {
       .eq("is_active", true)
       .order("name")
     setProducts(data || [])
-  }
-
-  const fetchDiscounts = async () => {
-    setLoading(true)
-    try {
-      const { data, error: err } = await supabase
-        .from("discounts")
-        .select("*")
-        .order("created_at", { ascending: false })
-
-      if (err) throw err
-      setDiscounts(data || [])
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setLoading(false)
-    }
   }
 
   const handleOpenModal = (discount = null) => {
@@ -150,7 +145,7 @@ export function DiscountsPage() {
     }
   }
 
-  if (loading) {
+  if (loading && discounts.length === 0) {
     return (
       <div style={{ display: "flex", justifyContent: "center", padding: "40px" }}>
         <LoadingSpinner />
@@ -172,10 +167,14 @@ export function DiscountsPage() {
         <div>
           <div className="page-title">Discounts & Promos</div>
           <div className="page-sub">
-            {discounts.length} discount codes
+            {totalCount.toLocaleString("en-IN")} discount codes
           </div>
         </div>
         <Button onClick={() => handleOpenModal()} variant="primary">Add Discount</Button>
+      </div>
+
+      <div className="search-filter">
+        <RowsPerLoad />
       </div>
 
       <div className="card">
@@ -223,6 +222,13 @@ export function DiscountsPage() {
             </tbody>
           </table>
         </div>
+        <LoadMore
+          shown={discounts.length}
+          total={totalCount}
+          onLoadMore={loadMore}
+          loading={loadingMore}
+          label="discounts"
+        />
       </div>
 
       {isModalOpen && (

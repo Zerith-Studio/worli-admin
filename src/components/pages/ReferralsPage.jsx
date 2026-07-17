@@ -1,40 +1,47 @@
-import React, { useState, useEffect } from "react"
-import { supabase } from "../../lib/supabase"
+import React from "react"
 import { Badge } from "../ui/Badge"
 import { LoadingSpinner } from "../ui/LoadingSpinner"
+import { LoadMore } from "../ui/LoadMore"
+import { RowsPerLoad } from "../ui/RowsPerLoad"
 import { UserNameLink } from "../ui/UserNameLink"
+import { usePaginatedQuery } from "../../hooks/usePaginatedQuery"
+
+const SELECT =
+  "*, referrer:users!referrer_id(id, full_name, phone_number), referee:users!referee_id(id, full_name, phone_number)"
 
 export function ReferralsPage() {
-  const [loading, setLoading] = useState(true)
-  const [referrals, setReferrals] = useState([])
+  // Previously fetched the whole table. That doesn't fail loudly as referrals
+  // accumulate — PostgREST just stops at its max-rows ceiling and the page
+  // quietly shows a prefix while claiming to show "N total referrals".
+  const { rows: referrals, loading, error, totalCount, loadingMore, loadMore } =
+    usePaginatedQuery({
+      table: "referrals",
+      select: SELECT,
+    })
 
-  useEffect(() => {
-    fetchReferrals()
-  }, [])
-
-  const fetchReferrals = async () => {
-    setLoading(true)
-    try {
-      const { data, error } = await supabase
-        .from("referrals")
-        .select("*, referrer:users!referrer_id(id, full_name, phone_number), referee:users!referee_id(id, full_name, phone_number)")
-        .order("created_at", { ascending: false })
-      if (error) throw error
-      setReferrals(data || [])
-    } catch (err) {
-      console.error(err)
-    } finally {
-      setLoading(false)
-    }
+  if (loading && referrals.length === 0) {
+    return (
+      <div style={{ display: "flex", justifyContent: "center", padding: "40px" }}>
+        <LoadingSpinner />
+      </div>
+    )
   }
-
-  if (loading) return <div style={{ display: "flex", justifyContent: "center", padding: "40px" }}><LoadingSpinner /></div>
 
   return (
     <div>
       <div className="page-header">
         <div className="page-title">Referrals</div>
-        <div className="page-sub">{referrals.length} total referrals</div>
+        <div className="page-sub">
+          {totalCount.toLocaleString("en-IN")} total referrals
+        </div>
+      </div>
+      {error && (
+        <div className="card" style={{ marginBottom: 12, color: "var(--red)" }}>
+          Error loading referrals: {error}
+        </div>
+      )}
+      <div className="search-filter">
+        <RowsPerLoad />
       </div>
       <div className="card">
         <table className="data-table">
@@ -61,8 +68,22 @@ export function ReferralsPage() {
                 <td><Badge variant={ref.status === "rewarded" ? "success" : ref.status === "expired" || ref.status === "cancelled" ? "danger" : "warning"}>{ref.status}</Badge></td>
               </tr>
             ))}
+            {referrals.length === 0 && (
+              <tr>
+                <td colSpan={7} style={{ textAlign: "center", padding: 24, color: "var(--text-3)" }}>
+                  No referrals yet.
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
+        <LoadMore
+          shown={referrals.length}
+          total={totalCount}
+          onLoadMore={loadMore}
+          loading={loadingMore}
+          label="referrals"
+        />
       </div>
     </div>
   )

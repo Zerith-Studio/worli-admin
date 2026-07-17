@@ -6,11 +6,13 @@
 import React, { useState } from 'react';
 import { useSubscriptions } from '../../hooks/useSubscriptions';
 import { useDataRefresh } from '../../hooks/useDataRefresh';
+import { useDebouncedSearch } from '../../hooks/useDebouncedValue';
 import { SearchInput } from '../ui/SearchInput';
 import { Select } from '../ui/Select';
 import { Button } from '../ui/Button';
 import { StatusBadge } from '../ui/StatusBadge';
-import { Pagination } from '../ui/Pagination';
+import { LoadMore } from '../ui/LoadMore';
+import { RowsPerLoad } from '../ui/RowsPerLoad';
 import { Modal } from '../ui/Modal';
 import { LoadingSpinner } from '../ui/LoadingSpinner';
 import { UserNameLink } from '../ui/UserNameLink';
@@ -39,9 +41,13 @@ function fmtDuration(sub) {
 
 export function SubscriptionsPage() {
   const {
-    subscriptions, loading, error, page, totalPages, totalCount,
-    filters, updateFilters, goToPage, updateSubscriptionStatus, refresh,
+    subscriptions, loading, error, totalCount, loadingMore, loadMore,
+    filters, updateFilters, updateSubscriptionStatus, refresh,
   } = useSubscriptions();
+
+  // Searching by customer name costs two round trips (name → user ids → subs),
+  // so this waits for a typing pause rather than firing per keystroke.
+  const [search, setSearch] = useDebouncedSearch(updateFilters);
 
   const [pauseModal, setPauseModal] = useState(null);
   const [holdDates, setHoldDates] = useState({ start: '', end: '', reason: '' });
@@ -91,11 +97,12 @@ export function SubscriptionsPage() {
       <div className="search-filter">
         <SearchInput
           placeholder="Search customer name or phone..."
-          value={filters.search}
-          onChange={value => updateFilters({ search: value })}
+          value={search}
+          onChange={setSearch}
         />
         <Select value={filters.type} onChange={value => updateFilters({ type: value })} options={TYPES} />
         <Select value={filters.status} onChange={value => updateFilters({ status: value })} options={STATUSES} />
+        <RowsPerLoad />
       </div>
 
       <div className="card" style={{ padding: 0 }}>
@@ -168,7 +175,13 @@ export function SubscriptionsPage() {
             </tbody>
           </table>
         </div>
-        <Pagination page={page} totalPages={totalPages} onPageChange={goToPage} />
+        <LoadMore
+          shown={subscriptions.length}
+          total={totalCount}
+          onLoadMore={loadMore}
+          loading={loadingMore}
+          label="subscriptions"
+        />
       </div>
 
       {pauseModal && (

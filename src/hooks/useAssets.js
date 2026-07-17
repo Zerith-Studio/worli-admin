@@ -1,17 +1,53 @@
 // ============================================
 // FILE: hooks/useAssets.js
-// Hook for fetching asset/bottle tracking data
+// Bottle/asset tracking.
+//
+// This used to fetch every bottle_return, every user, and EVERY delivered order
+// in the database, join them in JavaScript, then display the first 20 rows and
+// discard the rest. Both the per-customer figures and the stat cards are
+// aggregates, so they're computed in the database now (rpc_admin_bottle_rows /
+// rpc_admin_bottle_totals) and the list appends a batch at a time.
+//
+// It doesn't use usePaginatedQuery because its rows come from an RPC rather
+// than a table select, but the loading model is deliberately identical.
 // ============================================
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
+import { withTimeout } from '../lib/query';
+import { useRowsPerLoad } from '../lib/rows-per-load';
 
-const PAGE_SIZE = 20;
+const riskOf = (pending) => {
+  if (pending > 3) return 'high';
+  if (pending > 1) return 'medium';
+  return 'low';
+};
+
+const mapRow = (r) => {
+  const issued = Number(r.issued) || 0;
+  const returned = Number(r.returned) || 0;
+  const pending = Number(r.pending) || 0;
+  return {
+    id: r.id,
+    name: r.name,
+    zone: r.zone,
+    issued,
+    returned,
+    pending,
+    returnRate: issued > 0 ? Math.round((returned / issued) * 100) : 100,
+    risk: riskOf(pending),
+  };
+};
 
 export function useAssets() {
+  const batchSize = useRowsPerLoad();
+
   const [assets, setAssets] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState(null);
+  const [totalCount, setTotalCount] = useState(0);
+  const [filters, setFilters] = useState({ search: '', risk: 'all' });
   const [rawReturns, setRawReturns] = useState([]);
   const [stats, setStats] = useState({
     totalIssued: 0,
@@ -20,109 +56,119 @@ export function useAssets() {
     highOverdue: 0,
   });
 
-  const fetchAssets = useCallback(async (isBackground = false) => {
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+  const generationRef = useRef(0);
+  const loadedRef = useRef(0);
+
+  /** Loads rows [offset, offset+limit), replacing or appending. */
+  const fetchWindow = useCallback(async (offset, limit, mode, isBackground = false) => {
+    const generation = ++generationRef.current;
+    const isAppend = mode === 'append';
     try {
-      if (!isBackground) setLoading(true);
+      if (isAppend) setLoadingMore(true);
+      else if (!isBackground) setLoading(true);
       setError(null);
 
-      // Fetch bottle returns
-      const { data: returns, error: returnsError } = await supabase
-        .from('bottle_returns')
-        .select(`
-          id, user_id, quantity, status, return_date, notes,
-          addresses (address_line1, city, route_stop_id),
-          routes (name),
-          route_stops (name),
-          users:user_id (full_name, phone_number)
-        `);
+      const [rowsRes, totalsRes, returnsRes] = await withTimeout(Promise.all([
+        supabase.rpc('rpc_admin_bottle_rows', {
+          p_search: filters.search || null,
+          p_risk: filters.risk,
+          p_limit: limit,
+          p_offset: offset,
+        }),
+        supabase.rpc('rpc_admin_bottle_totals'),
+        // The outstanding-collection panel above the table. Bounded by status,
+        // and these are requests awaiting action rather than history, so the
+        // set stays small.
+        supabase
+          .from('bottle_returns')
+          .select(`
+            id, user_id, quantity, status, return_date, notes,
+            addresses (address_line1, city, route_stop_id),
+            routes (name),
+            route_stops (name),
+            users:user_id (full_name, phone_number)
+          `)
+          .in('status', ['requested', 'pending'])
+          .order('return_date', { ascending: true })
+          .limit(200),
+      ]));
 
-      if (returnsError) throw returnsError;
+      if (rowsRes.error) throw rowsRes.error;
+      if (totalsRes.error) throw totalsRes.error;
+      if (returnsRes.error) throw returnsRes.error;
+      if (!mountedRef.current || generation !== generationRef.current) return;
 
-      setRawReturns(returns || []);
+      const rows = (rowsRes.data?.rows ?? []).map(mapRow);
 
-      // Fetch users with bottles_pending
-      const { data: users, error: usersError } = await supabase
-        .from('users')
-        .select(`
-          id,
-          full_name,
-          bottles_pending,
-          addresses(city)
-        `);
+      if (isAppend) {
+        setAssets((prev) => {
+          // De-duplicate: offset windows shift if a customer's bottles_pending
+          // changes between batches (the list is ordered by it), which would
+          // otherwise re-send a row already on screen.
+          const seen = new Set(prev.map((r) => r.id));
+          const next = [...prev, ...rows.filter((r) => !seen.has(r.id))];
+          loadedRef.current = next.length;
+          return next;
+        });
+      } else {
+        setAssets(rows);
+        loadedRef.current = rows.length;
+      }
 
-      if (usersError) throw usersError;
+      setTotalCount(rowsRes.data?.total ?? 0);
+      setRawReturns(returnsRes.data || []);
 
-      // Calculate bottle stats per user
-      const userReturns = {};
-      returns?.forEach(ret => {
-        if (!userReturns[ret.user_id]) {
-          userReturns[ret.user_id] = { issued: 0, returned: 0 };
-        }
-        userReturns[ret.user_id].returned += (ret.quantity || 0);
-      });
-
-      // Calculate issued based on orders (simplified)
-      const { data: orders, error: ordersError } = await supabase
-        .from('orders')
-        .select('user_id, quantity')
-        .eq('status', 'delivered');
-
-      if (ordersError) throw ordersError;
-
-      orders?.forEach(order => {
-        if (!userReturns[order.user_id]) {
-          userReturns[order.user_id] = { issued: 0, returned: 0 };
-        }
-        userReturns[order.user_id].issued += (order.quantity || 1);
-      });
-
-      // Transform data
-      const transformedData = users?.map(user => {
-        const userRet = userReturns[user.id] || { issued: 0, returned: 0 };
-        const pending = user.bottles_pending || Math.max(0, userRet.issued - userRet.returned);
-        const returnRate = userRet.issued > 0 ? Math.round((userRet.returned / userRet.issued) * 100) : 100;
-        
-        let risk = 'low';
-        if (pending > 3) risk = 'high';
-        else if (pending > 1) risk = 'medium';
-
-        return {
-          id: user.id,
-          name: user.full_name || 'Unknown',
-          zone: user.addresses?.[0]?.city || 'Unknown',
-          issued: userRet.issued,
-          returned: userRet.returned,
-          pending,
-          returnRate,
-          risk,
-        };
-      }) || [];
-
-      // Calculate stats
-      const totalIssued = transformedData.reduce((sum, a) => sum + a.issued, 0);
-      const totalReturned = transformedData.reduce((sum, a) => sum + a.returned, 0);
-      const totalPending = transformedData.reduce((sum, a) => sum + a.pending, 0);
-      const highOverdue = transformedData.filter(a => a.pending > 3).length;
-
+      const t = totalsRes.data ?? {};
       setStats({
-        totalIssued,
-        totalReturned,
-        totalPending,
-        highOverdue,
+        totalIssued: Number(t.total_issued) || 0,
+        totalReturned: Number(t.total_returned) || 0,
+        totalPending: Number(t.total_pending) || 0,
+        highOverdue: Number(t.high_overdue) || 0,
       });
-
-      setAssets(transformedData.slice(0, PAGE_SIZE));
     } catch (err) {
       console.error('Error fetching assets:', err);
-      setError(err.message);
+      if (mountedRef.current && generation === generationRef.current) setError(err.message);
     } finally {
-      setLoading(false);
+      if (mountedRef.current && generation === generationRef.current) {
+        setLoading(false);
+        setLoadingMore(false);
+      }
     }
-  }, []);
+  }, [filters]);
 
+  // First batch — and again whenever the filters or the batch size change, each
+  // of which invalidates every row already on screen.
   useEffect(() => {
-    fetchAssets();
-  }, [fetchAssets]);
+    loadedRef.current = 0;
+    fetchWindow(0, batchSize, 'replace');
+  }, [fetchWindow, batchSize]);
+
+  const loadMore = useCallback(() => {
+    if (loading || loadingMore) return;
+    const offset = loadedRef.current;
+    if (offset === 0) return;
+    fetchWindow(offset, batchSize, 'append');
+  }, [fetchWindow, batchSize, loading, loadingMore]);
+
+  // Re-reads everything on screen, so a mutation or the 60s auto-refresh does
+  // not collapse a list someone has scrolled through.
+  const refresh = useCallback(
+    (isBackground = false) =>
+      fetchWindow(0, Math.max(loadedRef.current, batchSize), 'replace', isBackground),
+    [fetchWindow, batchSize]
+  );
+
+  const updateFilters = useCallback((newFilters) => {
+    setFilters((prev) => {
+      const next = { ...prev, ...newFilters };
+      return Object.keys(next).every((k) => next[k] === prev[k]) ? prev : next;
+    });
+  }, []);
 
   const assignBottleReturn = async (returnId, updates) => {
     try {
@@ -131,7 +177,7 @@ export function useAssets() {
         .update(updates)
         .eq('id', returnId);
       if (error) throw error;
-      fetchAssets();
+      await refresh(true);
       return { success: true };
     } catch (e) {
       return { success: false, error: e.message };
@@ -143,8 +189,14 @@ export function useAssets() {
     rawReturns,
     stats,
     loading,
+    loadingMore,
     error,
-    refresh: fetchAssets,
+    totalCount,
+    hasMore: assets.length < totalCount,
+    loadMore,
+    filters,
+    updateFilters,
+    refresh,
     assignBottleReturn,
   };
 }

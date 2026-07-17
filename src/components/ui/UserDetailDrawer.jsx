@@ -21,8 +21,42 @@ import { Drawer } from './Drawer';
 import { StatusBadge } from './StatusBadge';
 import { LoadingSpinner } from './LoadingSpinner';
 
+/** Rows loaded per step for the open-ended history lists (transactions, orders, returns). */
+const HISTORY_PAGE = 25;
+const INITIAL_LIMITS = {
+  transactions: HISTORY_PAGE,
+  orders: HISTORY_PAGE,
+  bottleReturns: HISTORY_PAGE,
+};
+
 const fmtDate = (iso) =>
   iso ? new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' }) : '—';
+
+/**
+ * Grows one of the history lists. Rendered only when there is more to show —
+ * these lists were previously capped at 25 with no indication that anything was
+ * missing, which on a wallet or delivery history is the kind of omission that
+ * makes an admin distrust the whole screen.
+ */
+function LoadMore({ shown, total, onClick, loading, label }) {
+  if (shown >= total) return null;
+  return (
+    <div style={{ marginTop: 8, textAlign: 'center' }}>
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={loading}
+        style={{
+          background: 'none', border: '1px solid var(--border)', borderRadius: 6,
+          padding: '6px 14px', fontSize: 11.5, cursor: loading ? 'default' : 'pointer',
+          color: 'var(--text-2)',
+        }}
+      >
+        {loading ? 'Loading…' : `Load more ${label} (${shown} of ${total})`}
+      </button>
+    </div>
+  );
+}
 const fmtDateTime = (iso) =>
   iso ? new Date(iso).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—';
 const money = (n) => `₹${Number(n || 0).toLocaleString('en-IN')}`;
@@ -129,47 +163,61 @@ export function UserDetailDrawer({ userId, onClose, onUserUpdated }) {
   const [showSubForm, setShowSubForm] = useState(false);
   const [showAddressForm, setShowAddressForm] = useState(false);
 
+  // How many rows of each open-ended history list are loaded. "Load more" grows
+  // the window rather than paging, which suits a narrow scrolling drawer and
+  // keeps the history as one continuous list.
+  const [limits, setLimits] = useState(INITIAL_LIMITS);
+  const loadMore = (key) =>
+    setLimits((l) => ({ ...l, [key]: l[key] + HISTORY_PAGE }));
+
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
       const [
         { data: user },
         { data: wallet },
-        { data: transactions },
+        { data: transactions, count: totalTransactions },
         { data: subscriptions },
-        { data: orders },
-        { count: totalOrders },
+        { data: orders, count: totalOrders },
         { data: addresses },
         { data: tickets },
-        { data: bottleReturns },
+        { data: bottleReturns, count: totalBottleReturns },
+        { count: pendingReturns },
         { data: referralsMade },
         { data: referralReceived },
         { data: preferences },
       ] = await Promise.all([
         supabase.from('users').select('*').eq('id', userId).single(),
         supabase.from('wallets').select('*').eq('user_id', userId).maybeSingle(),
-        supabase.from('transactions').select('*').eq('user_id', userId).order('created_at', { ascending: false }).limit(25),
+        // The three history lists below grow forever, so they load a window at a
+        // time. Each carries an exact count so "Load more" knows when to stop —
+        // and so the UI can say how much it isn't showing.
+        supabase.from('transactions').select('*', { count: 'exact' }).eq('user_id', userId).order('created_at', { ascending: false }).limit(limits.transactions),
         supabase.from('subscriptions').select('*, products(name)').eq('user_id', userId).order('created_at', { ascending: false }),
-        supabase.from('orders').select('id, order_number, delivery_date, status, quantity, amount, products(name)').eq('user_id', userId).order('delivery_date', { ascending: false }).limit(25),
-        supabase.from('orders').select('*', { count: 'exact', head: true }).eq('user_id', userId),
+        supabase.from('orders').select('id, order_number, delivery_date, status, quantity, amount, products(name)', { count: 'exact' }).eq('user_id', userId).order('delivery_date', { ascending: false }).limit(limits.orders),
         supabase.from('addresses').select('*').eq('user_id', userId).order('is_default', { ascending: false }),
         supabase.from('support_tickets').select('*').eq('user_id', userId).order('created_at', { ascending: false }),
-        supabase.from('bottle_returns').select('*').eq('user_id', userId).order('created_at', { ascending: false }).limit(25),
+        supabase.from('bottle_returns').select('*', { count: 'exact' }).eq('user_id', userId).order('created_at', { ascending: false }).limit(limits.bottleReturns),
+        // Counted server-side rather than by filtering the loaded window: with
+        // the window capped, a customer with a long return history had their
+        // outstanding count silently understated.
+        supabase.from('bottle_returns').select('*', { count: 'exact', head: true }).eq('user_id', userId).in('status', ['pending', 'requested']),
         supabase.from('referrals').select('*').eq('referrer_id', userId).order('created_at', { ascending: false }),
         supabase.from('referrals').select('*').eq('referee_id', userId).maybeSingle(),
         supabase.from('user_preferences').select('*').eq('user_id', userId).maybeSingle(),
       ]);
 
       const activeSubs = (subscriptions || []).filter(s => s.status === 'active').length;
-      const pendingReturns = (bottleReturns || []).filter(b => ['pending', 'requested'].includes(b.status)).length;
 
       setData({
         user, wallet, transactions: transactions || [], subscriptions: subscriptions || [],
         orders: orders || [], totalOrders: totalOrders || 0, addresses: addresses || [],
         tickets: tickets || [], bottleReturns: bottleReturns || [],
+        totalTransactions: totalTransactions || 0,
+        totalBottleReturns: totalBottleReturns || 0,
         referralsMade: referralsMade || [], referralReceived: referralReceived || null,
         preferences: preferences || null,
-        activeSubs, pendingReturns,
+        activeSubs, pendingReturns: pendingReturns || 0,
       });
     } catch (err) {
       console.error('Error fetching customer details:', err);
@@ -177,9 +225,12 @@ export function UserDetailDrawer({ userId, onClose, onUserUpdated }) {
     } finally {
       setLoading(false);
     }
-  }, [userId]);
+  }, [userId, limits]);
 
   useEffect(() => { if (userId) fetchAll(); }, [userId, fetchAll]);
+
+  // A new customer starts from the first window again.
+  useEffect(() => { setLimits(INITIAL_LIMITS); }, [userId]);
 
   useEffect(() => {
     if (!data?.user) return;
@@ -558,8 +609,11 @@ export function UserDetailDrawer({ userId, onClose, onUserUpdated }) {
   const TABS = ['profile', 'wallet', 'subscriptions', 'orders', 'addresses', 'bottles', 'support', 'referrals'];
 
   return (
-    <Drawer wide title={loading ? 'Loading…' : `Customer — ${u?.full_name || 'Unknown'}`} onClose={onClose}>
-      {loading ? (
+    <Drawer wide title={loading && !data ? 'Loading…' : `Customer — ${u?.full_name || 'Unknown'}`} onClose={onClose}>
+      {/* `&& !data` so this only covers the FIRST load. A "Load more" refetch
+          must not replace the tab with a spinner — that would throw away the
+          reader's place in the very list they were trying to extend. */}
+      {loading && !data ? (
         <div style={{ display: 'flex', justifyContent: 'center', padding: 40 }}><LoadingSpinner /></div>
       ) : !u ? (
         <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-3)' }}>User not found</div>
@@ -762,7 +816,7 @@ export function UserDetailDrawer({ userId, onClose, onUserUpdated }) {
               )}
 
               <div style={{ marginTop: 16 }}>
-                <SectionTitle count={data.transactions.length}>Recent Transactions</SectionTitle>
+                <SectionTitle count={data.totalTransactions}>Transactions</SectionTitle>
                 <MiniTable
                   columns={['Date', 'Type', 'Amount', 'Status']}
                   rows={data.transactions}
@@ -775,6 +829,13 @@ export function UserDetailDrawer({ userId, onClose, onUserUpdated }) {
                       <td style={{ padding: '6px 8px' }}><StatusBadge status={t.status} /></td>
                     </tr>
                   )}
+                />
+                <LoadMore
+                  shown={data.transactions.length}
+                  total={data.totalTransactions}
+                  onClick={() => loadMore('transactions')}
+                  loading={loading}
+                  label="transactions"
                 />
               </div>
             </div>
@@ -1104,6 +1165,13 @@ export function UserDetailDrawer({ userId, onClose, onUserUpdated }) {
               <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-4)', textAlign: 'center' }}>
                 Showing latest {data.orders.length} of {data.totalOrders} total orders
               </div>
+              <LoadMore
+                shown={data.orders.length}
+                total={data.totalOrders}
+                onClick={() => loadMore('orders')}
+                loading={loading}
+                label="orders"
+              />
             </div>
           )}
 
@@ -1209,7 +1277,7 @@ export function UserDetailDrawer({ userId, onClose, onUserUpdated }) {
                   <div style={{ fontSize: 22, fontWeight: 700, fontFamily: "'DM Mono',monospace" }}>{data.pendingReturns}</div>
                 </div>
               </div>
-              <SectionTitle count={data.bottleReturns.length}>Bottle Returns</SectionTitle>
+              <SectionTitle count={data.totalBottleReturns}>Bottle Returns</SectionTitle>
               <MiniTable
                 columns={['Date', 'Qty', 'Status', 'Collected']}
                 rows={data.bottleReturns}
@@ -1222,6 +1290,13 @@ export function UserDetailDrawer({ userId, onClose, onUserUpdated }) {
                     <td style={{ padding: '6px 8px', fontSize: 11.5 }}>{fmtDate(b.collected_at)}</td>
                   </tr>
                 )}
+              />
+              <LoadMore
+                shown={data.bottleReturns.length}
+                total={data.totalBottleReturns}
+                onClick={() => loadMore('bottleReturns')}
+                loading={loading}
+                label="returns"
               />
             </div>
           )}

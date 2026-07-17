@@ -112,5 +112,7 @@ export const RIDER_STATUSES = [
   { value: "inactive", label: "Inactive" },
 ]
 
-export const DEFAULT_PAGE_SIZE = 12
+// Rows per page for every paginated list. Previously each hook declared its own
+// (12/15/20), so the panel paged inconsistently for no reason.
+export const DEFAULT_PAGE_SIZE = 20
 export const REFRESH_INTERVAL = 60000

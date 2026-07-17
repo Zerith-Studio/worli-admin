@@ -1,29 +1,25 @@
-import React, { useState, useEffect, useCallback, useRef } from "react"
+import React, { useState, useEffect, useRef } from "react"
 import { supabase } from "../../lib/supabase"
 import { Badge } from "../ui/Badge"
 import { Button } from "../ui/Button"
 import { LoadingSpinner } from "../ui/LoadingSpinner"
+import { LoadMore } from "../ui/LoadMore"
+import { RowsPerLoad } from "../ui/RowsPerLoad"
 import { UserNameLink } from "../ui/UserNameLink"
+import { usePaginatedQuery } from "../../hooks/usePaginatedQuery"
+import { useDebouncedSearch } from "../../hooks/useDebouncedValue"
+import { orLiteral, resolveUserIdsMatching } from "../../lib/postgrest"
 
-const PAGE_SIZE = 20
-// Ceiling on how many customers a name/phone search resolves to before it feeds an
-// `in.(…)` list. Far above any realistic match count, and keeps the request URL sane.
-const USER_MATCH_LIMIT = 1000
-
-// Quote a value for use inside a PostgREST `or()` logic tree. Unquoted values break
-// the tree on `,` `.` `(` `)` — all of which a user can type into the search box.
-const orLiteral = (v) => `"${String(v).replace(/["\\]/g, (c) => "\\" + c)}"`
+const SELECT = `id, name, address_line1, address_line2, landmark, floor_number, city, state, pincode,
+   is_default, delivery_instructions, created_at,
+   user_id,
+   users!inner(full_name, phone_number),
+   route_stop_id,
+   route_stops(id, name, sequence_order, route_id, routes(name, hub_id, hubs(name)))`
 
 // ─── Component ─────────────────────────────────────────────────────────────────
 export function AddressesPage() {
-  const [addresses, setAddresses] = useState([])
-  const [totalCount, setTotalCount] = useState(0)
-  const [page, setPage] = useState(0)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-
-  // Filters & sort
-  const [search, setSearch] = useState("")
+  // Filters & sort — `search` is declared below, next to the query it feeds.
   const [stopFilter, setStopFilter] = useState("all") // "all" | "assigned" | "unassigned"
   const [sortField, setSortField] = useState("created_at")
   const [sortDir, setSortDir] = useState("desc")
@@ -66,74 +62,62 @@ export function AddressesPage() {
   }, [])
 
   // ── Fetch addresses ──────────────────────────────────────────────────────────
-  const fetchAddresses = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      let query = supabase
-        .from("addresses")
-        .select(
-          `id, name, address_line1, address_line2, landmark, floor_number, city, state, pincode,
-           is_default, delivery_instructions, created_at,
-           user_id,
-           users!inner(full_name, phone_number),
-           route_stop_id,
-           route_stops(id, name, sequence_order, route_id, routes(name, hub_id, hubs(name)))`,
-          { count: "exact" }
-        )
+  // Search: match on user name, phone, address line, city, pincode.
+  // PostgREST cannot OR a column of this table against a column of an embedded
+  // one (users.full_name) inside a single logic tree — it rejects the whole
+  // filter ("failed to parse logic tree"). So the customer half of the search is
+  // resolved to user ids first, and OR'd in as addresses.user_id.
+  const prepare = async (filters) => {
+    const s = filters.search?.trim()
+    if (!s) return null
+    return { s, userIds: await resolveUserIdsMatching(s) }
+  }
 
-      // Search: match on user name, phone, address line, city, pincode.
-      // PostgREST cannot OR a column of this table against a column of an embedded
-      // one (users.full_name) inside a single logic tree — it rejects the whole
-      // filter ("failed to parse logic tree"). So the customer half of the search is
-      // resolved to user ids first, and OR'd in as addresses.user_id.
-      if (search.trim()) {
-        const s = search.trim()
-        const clauses = [
-          `address_line1.ilike.${orLiteral(`%${s}%`)}`,
-          `city.ilike.${orLiteral(`%${s}%`)}`,
-          `pincode.ilike.${orLiteral(`%${s}%`)}`,
-        ]
-
-        const { data: matchedUsers, error: userErr } = await supabase
-          .from("users")
-          .select("id")
-          .or(`full_name.ilike.${orLiteral(`%${s}%`)},phone_number.ilike.${orLiteral(`%${s}%`)}`)
-          .limit(USER_MATCH_LIMIT)
-        if (userErr) throw userErr
-        if (matchedUsers?.length) {
-          clauses.push(`user_id.in.(${matchedUsers.map(u => u.id).join(",")})`)
-        }
-
-        query = query.or(clauses.join(","))
-      }
-
-      // Stop filter
-      if (stopFilter === "assigned") query = query.not("route_stop_id", "is", null)
-      if (stopFilter === "unassigned") query = query.is("route_stop_id", null)
-
-      // Sort
-      query = query.order(sortField, { ascending: sortDir === "asc" })
-
-      // Pagination
-      const from = page * PAGE_SIZE
-      const { data, error: err, count } = await query.range(from, from + PAGE_SIZE - 1)
-
-      if (err) throw err
-      if (!mountedRef.current) return
-      setAddresses(data || [])
-      setTotalCount(count || 0)
-    } catch (e) {
-      if (mountedRef.current) setError(e.message)
-    } finally {
-      if (mountedRef.current) setLoading(false)
+  const applyFilters = (query, filters, prepared) => {
+    if (prepared) {
+      const { s, userIds } = prepared
+      const clauses = [
+        `address_line1.ilike.${orLiteral(`%${s}%`)}`,
+        `city.ilike.${orLiteral(`%${s}%`)}`,
+        `pincode.ilike.${orLiteral(`%${s}%`)}`,
+      ]
+      if (userIds.length) clauses.push(`user_id.in.(${userIds.join(",")})`)
+      query = query.or(clauses.join(","))
     }
-  }, [search, stopFilter, sortField, sortDir, page])
 
-  useEffect(() => { fetchAddresses() }, [fetchAddresses])
+    // Stop filter
+    if (filters.stopFilter === "assigned") query = query.not("route_stop_id", "is", null)
+    if (filters.stopFilter === "unassigned") query = query.is("route_stop_id", null)
+    return query
+  }
 
-  // Reset to page 0 when filters change
-  useEffect(() => { setPage(0) }, [search, stopFilter, sortField, sortDir])
+  const {
+    rows: addresses,
+    totalCount,
+    loadingMore,
+    loadMore,
+    loading,
+    error,
+    updateFilters,
+    refresh: fetchAddresses,
+  } = usePaginatedQuery({
+    table: "addresses",
+    select: SELECT,
+    initialFilters: { search: "", stopFilter: "all" },
+    prepare,
+    applyFilters,
+    orderBy: { column: sortField, ascending: sortDir === "asc" },
+  })
+
+  // Debounced: search is a server filter and resolves customer ids first, so an
+  // undebounced box would be two round trips per keystroke.
+  const [search, setSearch] = useDebouncedSearch(updateFilters)
+
+  // updateFilters resets to page 1, so filter changes can't strand the view on
+  // a page the new result set doesn't have.
+  useEffect(() => {
+    updateFilters({ stopFilter })
+  }, [stopFilter, updateFilters])
 
   // ── Sorting helper ───────────────────────────────────────────────────────────
   const handleSort = (field) => {
@@ -237,8 +221,6 @@ export function AddressesPage() {
   const routesForHub = allRoutes.filter(r => r.hub_id === assignHub)
   const stopsForRoute = allStops.filter(s => s.route_id === assignRoute)
 
-  const totalPages = Math.ceil(totalCount / PAGE_SIZE)
-
   return (
     <div>
       {/* ── Header ───────────────────────────────────────────────────────── */}
@@ -264,6 +246,7 @@ export function AddressesPage() {
           <option value="assigned">Stop Assigned</option>
           <option value="unassigned">No Stop Assigned</option>
         </select>
+        <RowsPerLoad />
       </div>
 
       {/* ── Two-column layout: table + assignment panel ───────────────────── */}
@@ -358,18 +341,16 @@ export function AddressesPage() {
                 </tbody>
               </table>
 
-              {/* Pagination */}
-              {totalPages > 1 && (
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", borderTop: "1px solid var(--border)" }}>
-                  <div style={{ fontSize: 12, color: "var(--text-3)" }}>
-                    Page {page + 1} of {totalPages} · {totalCount} total
-                  </div>
-                  <div style={{ display: "flex", gap: 6 }}>
-                    <Button variant="secondary" disabled={page === 0} onClick={() => setPage(p => p - 1)}>← Prev</Button>
-                    <Button variant="secondary" disabled={page >= totalPages - 1} onClick={() => setPage(p => p + 1)}>Next →</Button>
-                  </div>
-                </div>
-              )}
+              {/* Was a hand-rolled 0-based copy of this — the only 0-based pager
+                  in the panel, which is exactly the kind of off-by-one nobody
+                  notices until a page is missing. */}
+              <LoadMore
+                shown={addresses.length}
+                total={totalCount}
+                onLoadMore={loadMore}
+                loading={loadingMore}
+                label="addresses"
+              />
             </div>
           )}
         </div>

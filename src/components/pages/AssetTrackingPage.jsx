@@ -6,17 +6,37 @@
 import React from 'react';
 import { useAssets } from '../../hooks/useAssets';
 import { useDataRefresh } from '../../hooks/useDataRefresh';
+import { useDebouncedSearch } from '../../hooks/useDebouncedValue';
 import { ProgressBar } from '../ui/ProgressBar';
 import { StatusBadge } from '../ui/StatusBadge';
 import { LoadingSpinner } from '../ui/LoadingSpinner';
+import { LoadMore } from '../ui/LoadMore';
+import { RowsPerLoad } from '../ui/RowsPerLoad';
+import { SearchInput } from '../ui/SearchInput';
+import { Select } from '../ui/Select';
 import { UserNameLink } from '../ui/UserNameLink';
 
+const RISK_OPTIONS = [
+  { value: 'all', label: 'All Customers' },
+  { value: 'high', label: 'High (3+ pending)' },
+  { value: 'medium', label: 'Medium (2–3)' },
+  { value: 'low', label: 'Low (0–1)' },
+];
+
 export function AssetTrackingPage() {
-  const { assets, rawReturns, stats, loading, error, refresh } = useAssets();
+  const {
+    assets, rawReturns, stats, loading, error,
+    totalCount, loadingMore, loadMore, filters, updateFilters, refresh,
+  } = useAssets();
+
+  const [search, setSearch] = useDebouncedSearch(updateFilters);
 
   useDataRefresh(refresh, 60000, true);
 
-  if (loading) {
+  // Only on the FIRST load. Searching and paging are server round trips now, so
+  // an unconditional spinner would unmount the search box on every keystroke and
+  // take the user's focus and cursor with it.
+  if (loading && assets.length === 0) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', padding: '40px' }}>
         <LoadingSpinner />
@@ -120,6 +140,20 @@ export function AssetTrackingPage() {
         </div>
       )}
 
+      <div className="search-filter">
+        <SearchInput
+          placeholder="Search customer or phone..."
+          value={search}
+          onChange={setSearch}
+        />
+        <Select
+          value={filters.risk}
+          onChange={(value) => updateFilters({ risk: value })}
+          options={RISK_OPTIONS}
+        />
+        <RowsPerLoad />
+      </div>
+
       <div className="card" style={{ padding: 0 }}>
         <div className="table-wrap">
           <table>
@@ -170,9 +204,23 @@ export function AssetTrackingPage() {
                   </td>
                 </tr>
               ))}
+              {assets.length === 0 && !loading && (
+                <tr>
+                  <td colSpan={7} style={{ textAlign: 'center', padding: 24, color: 'var(--text-3)' }}>
+                    No customers match these filters.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
+        <LoadMore
+          shown={assets.length}
+          total={totalCount}
+          onLoadMore={loadMore}
+          loading={loadingMore}
+          label="customers"
+        />
       </div>
     </div>
   );

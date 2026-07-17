@@ -4,42 +4,65 @@
 // and the global serviceability gate toggle.
 // ============================================
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 import { Button } from '../ui/Button';
 import { StatusBadge } from '../ui/StatusBadge';
 import { Toggle } from '../ui/Toggle';
 import { LoadingSpinner } from '../ui/LoadingSpinner';
+import { LoadMore } from '../ui/LoadMore';
+import { RowsPerLoad } from '../ui/RowsPerLoad';
+import { usePaginatedQuery } from '../../hooks/usePaginatedQuery';
 
 export function ServiceAreaPage() {
-  const [pincodes, setPincodes] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
   const [gateEnabled, setGateEnabled] = useState(true);
 
   const [form, setForm] = useState({ pincode: '', area_name: '' });
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState('');
 
-  const fetchData = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const [{ data: pins, error: pinErr }, { data: setting }] = await Promise.all([
-        supabase.from('serviceable_pincodes').select('*').order('pincode'),
-        supabase.from('app_settings').select('setting_value').eq('setting_key', 'serviceability_check_enabled').maybeSingle(),
-      ]);
-      if (pinErr) throw pinErr;
-      setPincodes(pins || []);
-      setGateEnabled(String(setting?.setting_value ?? 'true').toLowerCase() === 'true');
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
+  const {
+    rows: pincodes,
+    loading,
+    error,
+    totalCount, loadingMore, loadMore,
+    refresh: fetchData,
+  } = usePaginatedQuery({
+    table: 'serviceable_pincodes',
+    select: '*',
+    orderBy: { column: 'pincode', ascending: true },
+  });
+
+  // The gate lives in app_settings, not in the paginated list, so it loads on
+  // its own rather than riding along with a page fetch.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data: setting, error: settingErr } = await supabase
+        .from('app_settings')
+        .select('setting_value')
+        .eq('setting_key', 'serviceability_check_enabled')
+        .maybeSingle();
+      if (settingErr) { console.error('[ServiceArea] gate load failed', settingErr); return; }
+      if (!cancelled) setGateEnabled(String(setting?.setting_value ?? 'true').toLowerCase() === 'true');
+    })();
+    return () => { cancelled = true; };
   }, []);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  // "N active" describes the whole table, not the loaded page.
+  const [activeCount, setActiveCount] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { count, error: countErr } = await supabase
+        .from('serviceable_pincodes')
+        .select('id', { count: 'exact', head: true })
+        .eq('is_active', true);
+      if (countErr) { console.error('[ServiceArea] active count failed', countErr); return; }
+      if (!cancelled) setActiveCount(count ?? 0);
+    })();
+    return () => { cancelled = true; };
+  }, [pincodes]);
 
   const handleAdd = async () => {
     const pin = form.pincode.trim();
@@ -87,7 +110,7 @@ export function ServiceAreaPage() {
     <div>
       <div className="page-header">
         <div className="page-title">Service Area</div>
-        <div className="page-sub">{pincodes.length} pincodes · {pincodes.filter(p => p.is_active).length} active</div>
+        <div className="page-sub">{totalCount.toLocaleString('en-IN')} pincodes · {activeCount} active</div>
       </div>
 
       {error && (
@@ -140,6 +163,9 @@ export function ServiceAreaPage() {
       </div>
 
       {/* List */}
+      <div className="search-filter">
+        <RowsPerLoad />
+      </div>
       <div className="card" style={{ padding: 0 }}>
         <div className="table-wrap">
           <table>
@@ -174,6 +200,13 @@ export function ServiceAreaPage() {
             </tbody>
           </table>
         </div>
+        <LoadMore
+          shown={pincodes.length}
+          total={totalCount}
+          onLoadMore={loadMore}
+          loading={loadingMore}
+          label="pincodes"
+        />
       </div>
     </div>
   );

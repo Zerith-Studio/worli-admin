@@ -1,39 +1,28 @@
-import React, { useState, useEffect } from "react"
+import React, { useState } from "react"
 import { supabase } from "../../lib/supabase"
 import { Badge } from "../ui/Badge"
 import { Button } from "../ui/Button"
 import { Modal } from "../ui/Modal"
 import { LoadingSpinner } from "../ui/LoadingSpinner"
+import { LoadMore } from "../ui/LoadMore"
+import { RowsPerLoad } from "../ui/RowsPerLoad"
 import { UserNameLink } from "../ui/UserNameLink"
+import { usePaginatedQuery } from "../../hooks/usePaginatedQuery"
 
 export function SupportTicketsPage() {
-  const [loading, setLoading] = useState(true)
-  const [tickets, setTickets] = useState([])
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [currentTicket, setCurrentTicket] = useState(null)
   const [status, setStatus] = useState("open")
   const [saving, setSaving] = useState(false)
 
-
-  useEffect(() => {
-    fetchTickets()
-  }, [])
-
-  const fetchTickets = async () => {
-    setLoading(true)
-    try {
-      const { data, error } = await supabase
-        .from("support_tickets")
-        .select("*, users(id, full_name, phone_number, is_active, bottles_pending, wallets(balance))")
-        .order("created_at", { ascending: false })
-      if (error) throw error
-      setTickets(data || [])
-    } catch (err) {
-      console.error(err)
-    } finally {
-      setLoading(false)
-    }
-  }
+  // The ticket table only grows; fetching it whole meant the page silently
+  // showed whatever prefix PostgREST felt like returning.
+  const { rows: tickets, loading, error, totalCount, loadingMore, loadMore, refresh } =
+    usePaginatedQuery({
+      table: "support_tickets",
+      select: "*, users(id, full_name, phone_number, is_active, bottles_pending, wallets(balance))",
+      orderBy: { column: "created_at", ascending: false },
+    })
 
   const handleOpenModal = (ticket) => {
     setCurrentTicket(ticket)
@@ -50,7 +39,7 @@ export function SupportTicketsPage() {
       }
       await supabase.from("support_tickets").update(updates).eq("id", currentTicket.id)
       setIsModalOpen(false)
-      fetchTickets()
+      refresh()
     } catch (e) {
       alert("Error saving ticket: " + e.message)
     } finally {
@@ -58,13 +47,21 @@ export function SupportTicketsPage() {
     }
   }
 
-  if (loading) return <div style={{ display: "flex", justifyContent: "center", padding: "40px" }}><LoadingSpinner /></div>
+  if (loading && tickets.length === 0) return <div style={{ display: "flex", justifyContent: "center", padding: "40px" }}><LoadingSpinner /></div>
 
   return (
     <div>
       <div className="page-header">
         <div className="page-title">Support Tickets</div>
-        <div className="page-sub">{tickets.length} total tickets</div>
+        <div className="page-sub">{totalCount.toLocaleString('en-IN')} total tickets</div>
+      </div>
+      {error && (
+        <div className="card" style={{ marginBottom: 12, color: "var(--red)" }}>
+          Error loading tickets: {error}
+        </div>
+      )}
+      <div className="search-filter">
+        <RowsPerLoad />
       </div>
       <div className="card">
         <table className="data-table">
@@ -95,8 +92,22 @@ export function SupportTicketsPage() {
                 </td>
               </tr>
             ))}
+            {tickets.length === 0 && (
+              <tr>
+                <td colSpan={7} style={{ textAlign: "center", padding: 24, color: "var(--text-3)" }}>
+                  No tickets found.
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
+        <LoadMore
+          shown={tickets.length}
+          total={totalCount}
+          onLoadMore={loadMore}
+          loading={loadingMore}
+          label="tickets"
+        />
       </div>
 
       {isModalOpen && (

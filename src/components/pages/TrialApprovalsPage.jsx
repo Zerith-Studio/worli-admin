@@ -3,13 +3,16 @@
 // Review pending trial sample claims — approve / decline.
 // ============================================
 
-import React, { useState, useEffect, useCallback } from "react"
+import React, { useState } from "react"
 import { supabase } from "../../lib/supabase"
 import { getFunctionErrorMessage } from "../../lib/function-errors"
 import { Button } from "../ui/Button"
 import { StatusBadge } from "../ui/StatusBadge"
 import { LoadingSpinner } from "../ui/LoadingSpinner"
+import { LoadMore } from "../ui/LoadMore"
+import { RowsPerLoad } from "../ui/RowsPerLoad"
 import { UserNameLink } from "../ui/UserNameLink"
+import { usePaginatedQuery } from "../../hooks/usePaginatedQuery"
 
 function fmtDate(iso) {
   if (!iso) return "—"
@@ -19,35 +22,34 @@ function fmtDate(iso) {
 }
 
 export function TrialApprovalsPage() {
-  const [claims, setClaims] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-  const [showAll, setShowAll] = useState(false)
   const [actioning, setActioning] = useState(null)   // claim id currently being processed
   const [expanded, setExpanded] = useState(null)     // claim id whose orders are shown
   const [ordersByClaim, setOrdersByClaim] = useState({})
 
   // ── Fetch claims ────────────────────────────────────────────
-  const fetchClaims = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      let query = supabase
-        .from("trial_sample_claims")
-        .select("*, users(full_name, phone_number)")
-        .order("created_at", { ascending: false })
-      if (!showAll) query = query.eq("status", "pending")
-      const { data, error: err } = await query
-      if (err) throw err
-      setClaims(data || [])
-    } catch (e) {
-      setError(e.message)
-    } finally {
-      setLoading(false)
-    }
-  }, [showAll])
-
-  useEffect(() => { fetchClaims() }, [fetchClaims])
+  // `showAll` is a server filter rather than a JS filter over the fetched
+  // array: with pagination, filtering client-side would only ever filter the
+  // rows that happened to land on the current page.
+  const {
+    rows: claims,
+    loading,
+    error,
+    totalCount,
+    loadingMore,
+    loadMore,
+    filters,
+    updateFilters,
+    refresh,
+  } = usePaginatedQuery({
+    table: "trial_sample_claims",
+    select: "*, users(full_name, phone_number)",
+    initialFilters: { showAll: false },
+    applyFilters: (query, f) => {
+      if (!f.showAll) query = query.eq("status", "pending")
+      return query
+    },
+    orderBy: { column: "created_at", ascending: false },
+  })
 
   // ── Load orders attached to a claim ─────────────────────────
   const toggleOrders = async (claim) => {
@@ -77,15 +79,13 @@ export function TrialApprovalsPage() {
       if (res.error || res.data?.error) {
         throw new Error(await getFunctionErrorMessage(res.error, res.data))
       }
-      await fetchClaims()
+      await refresh()
     } catch (e) {
       alert("Error: " + e.message)
     } finally {
       setActioning(null)
     }
   }
-
-  const pendingCount = claims.filter((c) => c.status === "pending").length
 
   if (loading && claims.length === 0) {
     return <div style={{ display: "flex", justifyContent: "center", padding: "40px" }}><LoadingSpinner /></div>
@@ -100,11 +100,18 @@ export function TrialApprovalsPage() {
       <div className="page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div>
           <div className="page-title">Trial Approvals</div>
-          <div className="page-sub">{pendingCount} pending claim{pendingCount === 1 ? "" : "s"}</div>
+          <div className="page-sub">
+            {totalCount.toLocaleString('en-IN')}
+            {filters.showAll ? " claim" : " pending claim"}{totalCount === 1 ? "" : "s"}
+          </div>
         </div>
-        <Button variant="secondary" onClick={() => setShowAll((v) => !v)}>
-          {showAll ? "Show Pending Only" : "Show All"}
+        <Button variant="secondary" onClick={() => updateFilters({ showAll: !filters.showAll })}>
+          {filters.showAll ? "Show Pending Only" : "Show All"}
         </Button>
+      </div>
+
+      <div className="search-filter">
+        <RowsPerLoad />
       </div>
 
       <div className="card">
@@ -209,6 +216,13 @@ export function TrialApprovalsPage() {
             </tbody>
           </table>
         </div>
+        <LoadMore
+          shown={claims.length}
+          total={totalCount}
+          onLoadMore={loadMore}
+          loading={loadingMore}
+          label="claims"
+        />
       </div>
     </div>
   )

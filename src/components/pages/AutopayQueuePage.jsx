@@ -1,39 +1,40 @@
-import React, { useState, useEffect } from "react"
-import { supabase } from "../../lib/supabase"
+import React from "react"
 import { Badge } from "../ui/Badge"
 import { LoadingSpinner } from "../ui/LoadingSpinner"
+import { LoadMore } from "../ui/LoadMore"
+import { RowsPerLoad } from "../ui/RowsPerLoad"
+import { usePaginatedQuery } from "../../hooks/usePaginatedQuery"
 
 export function AutopayQueuePage() {
-  const [loading, setLoading] = useState(true)
-  const [queue, setQueue] = useState([])
+  // The queue is append-only and grows with every autopay trigger, so fetching
+  // it whole was living on borrowed time.
+  const { rows: queue, loading, error, totalCount, loadingMore, loadMore } =
+    usePaginatedQuery({
+      table: "autopay_queue",
+      select: "*, users(full_name, phone_number)",
+    })
 
-  useEffect(() => {
-    fetchQueue()
-  }, [])
-
-  const fetchQueue = async () => {
-    setLoading(true)
-    try {
-      const { data, error } = await supabase
-        .from("autopay_queue")
-        .select("*, users(full_name, phone_number)")
-        .order("created_at", { ascending: false })
-      if (error) throw error
-      setQueue(data || [])
-    } catch (err) {
-      console.error(err)
-    } finally {
-      setLoading(false)
-    }
+  if (loading && queue.length === 0) {
+    return (
+      <div style={{ display: "flex", justifyContent: "center", padding: "40px" }}>
+        <LoadingSpinner />
+      </div>
+    )
   }
-
-  if (loading) return <div style={{ display: "flex", justifyContent: "center", padding: "40px" }}><LoadingSpinner /></div>
 
   return (
     <div>
       <div className="page-header">
         <div className="page-title">Autopay Queue</div>
-        <div className="page-sub">{queue.length} items in queue</div>
+        <div className="page-sub">{totalCount.toLocaleString("en-IN")} items in queue</div>
+      </div>
+      {error && (
+        <div className="card" style={{ marginBottom: 12, color: "var(--red)" }}>
+          Error loading queue: {error}
+        </div>
+      )}
+      <div className="search-filter">
+        <RowsPerLoad />
       </div>
       <div className="card">
         <table className="data-table">
@@ -58,8 +59,22 @@ export function AutopayQueuePage() {
                 <td style={{ color: "var(--red)" }}>{item.error_message || "-"}</td>
               </tr>
             ))}
+            {queue.length === 0 && (
+              <tr>
+                <td colSpan={6} style={{ textAlign: "center", padding: 24, color: "var(--text-3)" }}>
+                  Nothing in the queue.
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
+        <LoadMore
+          shown={queue.length}
+          total={totalCount}
+          onLoadMore={loadMore}
+          loading={loadingMore}
+          label="items"
+        />
       </div>
     </div>
   )

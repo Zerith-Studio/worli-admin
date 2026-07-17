@@ -12,6 +12,8 @@ import { StatusBadge } from '../ui/StatusBadge';
 import { Modal } from '../ui/Modal';
 import { Drawer } from '../ui/Drawer';
 import { LoadingSpinner } from '../ui/LoadingSpinner';
+import { LoadMore } from '../ui/LoadMore';
+import { RowsPerLoad } from '../ui/RowsPerLoad';
 
 const EMPTY_ROUTE_FORM = { name: '', hub_id: '', description: '' };
 const EMPTY_STOP_FORM = { name: '', address: '', map_url: '', notes: '' };
@@ -271,7 +273,11 @@ function StopsDrawer({ route, onClose }) {
 
 // ─── Main Routes Page ──────────────────────────────────────────────────────────
 export function RoutesPage() {
-  const { routes, hubs, loading, error, saving, createRoute, updateRoute, toggleRouteActive, refresh } = useRoutes();
+  const {
+    routes, hubs, loading, error, saving,
+    totalCount, loadingMore, loadMore,
+    createRoute, updateRoute, toggleRouteActive, refresh,
+  } = useRoutes();
   const [routeModal, setRouteModal] = useState(null); // null | { mode: 'create' | 'edit', route? }
   const [routeForm, setRouteForm] = useState(EMPTY_ROUTE_FORM);
   const [routeFormError, setRouteFormError] = useState('');
@@ -309,9 +315,13 @@ export function RoutesPage() {
       <div className="page-header" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
         <div>
           <div className="page-title">Routes</div>
-          <div className="page-sub">{routes.length} routes configured</div>
+          <div className="page-sub">{totalCount.toLocaleString('en-IN')} routes configured</div>
         </div>
         <Button variant="primary" onClick={openCreate}>+ New Route</Button>
+      </div>
+
+      <div className="search-filter">
+        <RowsPerLoad />
       </div>
 
       <div className="card" style={{ padding: 0 }}>
@@ -368,6 +378,13 @@ export function RoutesPage() {
             </tbody>
           </table>
         </div>
+        <LoadMore
+          shown={routes.length}
+          total={totalCount}
+          onLoadMore={loadMore}
+          loading={loadingMore}
+          label="routes"
+        />
       </div>
 
       {/* Route create/edit modal */}

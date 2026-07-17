@@ -10,6 +10,9 @@ import React, { useState } from 'react';
 import { useOrders } from '../../hooks/useOrders';
 import { useDrivers } from '../../hooks/useDrivers';
 import { useDataRefresh } from '../../hooks/useDataRefresh';
+import { useDebouncedSearch } from '../../hooks/useDebouncedValue';
+import { LoadMore } from '../ui/LoadMore';
+import { RowsPerLoad } from '../ui/RowsPerLoad';
 import { Select } from '../ui/Select';
 import { Button } from '../ui/Button';
 import { StatusBadge } from '../ui/StatusBadge';
@@ -26,12 +29,15 @@ const STATUSES = [
 ];
 
 export function OrdersPage() {
-  const { 
-    orders, 
-    loading, 
-    error, 
-    filters, 
-    updateFilters, 
+  const {
+    orders,
+    loading,
+    error,
+    totalCount,
+    loadingMore,
+    loadMore,
+    filters,
+    updateFilters,
     updateOrderStatus,
     reassignDriver,
     retryOrder,
@@ -49,7 +55,10 @@ export function OrdersPage() {
   const [deliverModal, setDeliverModal] = useState(null);  // confirmation
   const [delivering, setDelivering] = useState(false);
   const [deliverMsg, setDeliverMsg] = useState(null);
-  const [search, setSearch] = useState('');
+  // Server filter — searching `orders` in JS only ever searched the current
+  // page, so a customer on page 3 was unfindable. Debounced so it queries on a
+  // typing pause, not per keystroke.
+  const [search, setSearch] = useDebouncedSearch(updateFilters);
   const [photoModal, setPhotoModal] = useState(null); // url string or null
   const [reassignModal, setReassignModal] = useState(null); // order object
   const [selectedDriver, setSelectedDriver] = useState('');
@@ -63,13 +72,7 @@ export function OrdersPage() {
 
   useDataRefresh(refresh, 60000, true);
 
-  // Client-side search filter (name or order number)
-  const displayedOrders = search.trim()
-    ? orders.filter(o =>
-        o.customerName.toLowerCase().includes(search.toLowerCase()) ||
-        o.orderNumber?.toLowerCase().includes(search.toLowerCase())
-      )
-    : orders;
+  const displayedOrders = orders;
 
   const handleMarkDelivered = (o) => {
     setDeliverModal(o);
@@ -231,7 +234,11 @@ export function OrdersPage() {
       <div className="page-header" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
         <div>
           <div className="page-title">Orders</div>
-          <div className="page-sub">{orders.length} orders for selected date</div>
+          {/* totalCount, not orders.length — the latter is just the page size,
+              so this read "20 orders" every day regardless of the real number. */}
+          <div className="page-sub">
+            {totalCount.toLocaleString('en-IN')} orders for selected date
+          </div>
         </div>
         <Button variant="primary" onClick={handleAutoAssign} disabled={autoAssigning}>
           {autoAssigning ? 'Running...' : 'Run Auto-Assignment'}
@@ -256,6 +263,7 @@ export function OrdersPage() {
           onChange={(value) => updateFilters({ status: value })}
           options={STATUSES}
         />
+        <RowsPerLoad />
       </div>
 
       <div className="card" style={{ padding: 0 }}>
@@ -332,6 +340,13 @@ export function OrdersPage() {
             </tbody>
           </table>
         </div>
+        <LoadMore
+          shown={orders.length}
+          total={totalCount}
+          onLoadMore={loadMore}
+          loading={loadingMore}
+          label="orders"
+        />
       </div>
 
       {/* ORDER DETAIL DRAWER */}

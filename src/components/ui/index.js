@@ -12,6 +12,7 @@ export { MiniChart } from './MiniChart';
 export { Toggle } from './Toggle';
 export { SearchInput } from './SearchInput';
 export { Select } from './Select';
-export { Pagination } from './Pagination';
+export { LoadMore } from './LoadMore';
+export { RowsPerLoad } from './RowsPerLoad';
 export { LoadingSpinner } from './LoadingSpinner';
 export { StatusBadge } from './StatusBadge';

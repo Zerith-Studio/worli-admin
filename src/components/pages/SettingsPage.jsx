@@ -1,8 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { useSettings } from '../../hooks/useSettings';
+import { usePaginatedQuery } from '../../hooks/usePaginatedQuery';
 import { supabase } from '../../lib/supabase';
 import { Button } from '../ui/Button';
 import { LoadingSpinner } from '../ui/LoadingSpinner';
+import { LoadMore } from '../ui/LoadMore';
+import { RowsPerLoad } from '../ui/RowsPerLoad';
 
 export function SettingsPage() {
   const { 
@@ -14,21 +17,27 @@ export function SettingsPage() {
   } = useSettings();
 
   const [localSettings, setLocalSettings] = useState({});
-  const [durationDiscounts, setDurationDiscounts] = useState([]);
   const [discountSaving, setDiscountSaving] = useState(false);
   const [discountMsg, setDiscountMsg] = useState(null);
+
+  // Admins can add duration tiers (day-based ones landed recently), so this
+  // table is no longer the fixed 1/3/6 it was written for.
+  const {
+    rows: durationDiscounts,
+    setRows: setDurationDiscounts,
+    loadingMore: discountLoadingMore,
+    loadMore: loadMoreDiscounts,
+    totalCount: discountTotalCount,
+    refresh: refreshDiscounts,
+  } = usePaginatedQuery({
+    table: 'subscription_duration_discounts',
+    select: '*',
+    orderBy: { column: 'duration_months', ascending: true },
+  });
 
   useEffect(() => {
     setLocalSettings(settings);
   }, [settings]);
-
-  useEffect(() => {
-    supabase
-      .from('subscription_duration_discounts')
-      .select('*')
-      .order('duration_months')
-      .then(({ data }) => { if (data) setDurationDiscounts(data); });
-  }, []);
 
   const updateLocal = (key, val) => {
     setLocalSettings(prev => ({ ...prev, [key]: val }));
@@ -48,6 +57,8 @@ export function SettingsPage() {
     setDiscountSaving(true);
     setDiscountMsg(null);
     try {
+      // The page's rows are the only ones the admin can have edited, so saving
+      // the page is saving every pending change.
       for (const d of durationDiscounts) {
         const { error: err } = await supabase
           .from('subscription_duration_discounts')
@@ -60,6 +71,7 @@ export function SettingsPage() {
         if (err) throw err;
       }
       setDiscountMsg({ ok: true, text: 'Duration discounts saved ✓' });
+      await refreshDiscounts(true);
     } catch (err) {
       setDiscountMsg({ ok: false, text: err.message });
     } finally {
@@ -211,6 +223,9 @@ export function SettingsPage() {
             {discountMsg.text}
           </div>
         )}
+        <div className="search-filter">
+          <RowsPerLoad />
+        </div>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr>
@@ -260,6 +275,13 @@ export function SettingsPage() {
             ))}
           </tbody>
         </table>
+        <LoadMore
+          shown={durationDiscounts.length}
+          total={discountTotalCount}
+          onLoadMore={loadMoreDiscounts}
+          loading={discountLoadingMore}
+          label="discounts"
+        />
         <div style={{ marginTop: 12 }}>
           <Button variant="primary" onClick={handleSaveDiscounts} disabled={discountSaving || durationDiscounts.length === 0}>
             {discountSaving ? 'Saving...' : 'Save Duration Discounts'}

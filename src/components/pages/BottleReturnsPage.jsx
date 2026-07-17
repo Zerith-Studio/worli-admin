@@ -6,15 +6,18 @@
 // Allows admin to manually mark pending returns as collected.
 // ============================================
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 import { Button } from '../ui/Button';
 import { StatusBadge } from '../ui/StatusBadge';
 import { Drawer } from '../ui/Drawer';
 import { LoadingSpinner } from '../ui/LoadingSpinner';
+import { LoadMore } from '../ui/LoadMore';
+import { RowsPerLoad } from '../ui/RowsPerLoad';
 import { Select } from '../ui/Select';
 import { useDataRefresh } from '../../hooks/useDataRefresh';
 import { useDrivers } from '../../hooks/useDrivers';
+import { usePaginatedQuery } from '../../hooks/usePaginatedQuery';
 import { UserNameLink } from '../ui/UserNameLink';
 import { Modal } from '../ui/Modal';
 
@@ -36,72 +39,82 @@ function fmtTime(iso) {
   return new Date(iso).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
 }
 
+const SELECT = `
+  id,
+  user_id,
+  order_id,
+  status,
+  quantity,
+  return_date,
+  collected_at,
+  notes,
+  photo_url,
+  created_at,
+  users:user_id ( full_name, phone_number ),
+  riders:rider_id ( users ( full_name ) ),
+  addresses:address_id ( address_line1, city ),
+  routes:route_id ( name ),
+  route_stops:route_stop_id ( name ),
+  orders:order_id ( order_number, bottle_photo_url )
+`;
+
 export function BottleReturnsPage() {
-  const [returns, setReturns] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [dateFilter, setDateFilter] = useState('');
   const [selectedReturn, setSelectedReturn] = useState(null);
   const [markingId, setMarkingId] = useState(null);
   const [markMsg, setMarkMsg] = useState(null);
   const [photoModal, setPhotoModal] = useState(null);
-  
+
   const { drivers } = useDrivers();
   const [reassignModal, setReassignModal] = useState(null);
   const [selectedDriver, setSelectedDriver] = useState('');
   const [autoAssigning, setAutoAssigning] = useState(false);
 
-  const mountedRef = useRef(true);
+  // One row per delivery that collected bottles, so this grows every morning.
+  // It used to be fetched whole, which quietly stops being the whole thing once
+  // it crosses PostgREST's max-rows ceiling.
+  const {
+    rows: returns,
+    loading,
+    error,
+    totalCount,
+    loadingMore,
+    loadMore,
+    filters,
+    updateFilters,
+    refresh: fetchReturns,
+  } = usePaginatedQuery({
+    table: 'bottle_returns',
+    select: SELECT,
+    initialFilters: { status: 'all', date: '' },
+    applyFilters: (query, f) => {
+      if (f.status !== 'all') query = query.eq('status', f.status);
+      if (f.date) query = query.eq('return_date', f.date);
+      return query;
+    },
+    orderBy: { column: 'created_at', ascending: false },
+  });
 
+  const statusFilter = filters.status;
+  const dateFilter = filters.date;
+
+  // The summary cards describe the whole filtered set, not the page, so they
+  // come from the database rather than from counting the loaded rows.
+  const [stats, setStats] = useState({
+    total_records: 0, pending_count: 0, collected_count: 0, total_bottles: 0,
+  });
   useEffect(() => {
-    mountedRef.current = true;
-    return () => { mountedRef.current = false; };
-  }, []);
+    let cancelled = false;
+    (async () => {
+      const { data, error: statsErr } = await supabase.rpc('rpc_admin_bottle_return_stats', {
+        p_status: statusFilter,
+        p_date: dateFilter || null,
+      });
+      if (statsErr) { console.error('[BottleReturns] stats failed', statsErr); return; }
+      if (!cancelled && data) setStats(data);
+    })();
+    return () => { cancelled = true; };
+  }, [statusFilter, dateFilter, returns]);
 
-  const fetchReturns = useCallback(async (isBackground = false) => {
-    try {
-      if (!isBackground) setLoading(true);
-      setError(null);
-
-      let query = supabase
-        .from('bottle_returns')
-        .select(`
-          id,
-          user_id,
-          order_id,
-          status,
-          quantity,
-          return_date,
-          collected_at,
-          notes,
-          photo_url,
-          created_at,
-          users:user_id ( full_name, phone_number ),
-          riders:rider_id ( users ( full_name ) ),
-          addresses:address_id ( address_line1, city ),
-          routes:route_id ( name ),
-          route_stops:route_stop_id ( name ),
-          orders:order_id ( order_number, bottle_photo_url )
-        `)
-        .order('created_at', { ascending: false });
-
-      if (statusFilter !== 'all') query = query.eq('status', statusFilter);
-      if (dateFilter) query = query.eq('return_date', dateFilter);
-
-      const { data, error: fetchError } = await query;
-      if (fetchError) throw fetchError;
-      if (!mountedRef.current) return;
-
-      setReturns(data || []);
-    } catch (err) {
-      if (mountedRef.current) setError(err.message);
-    } finally {
-      if (mountedRef.current) setLoading(false);
-    }
-  }, [statusFilter, dateFilter]);
-
-  useEffect(() => { fetchReturns(); }, [fetchReturns]);
   useDataRefresh(fetchReturns, 60000, true);
 
   const handleMarkCollected = async (returnId) => {
@@ -170,9 +183,6 @@ export function BottleReturnsPage() {
     }
   };
 
-  const pendingCount = returns.filter(r => r.status === 'pending' || r.status === 'requested').length;
-  const totalBottles = returns.reduce((s, r) => s + (r.quantity || 0), 0);
-
   if (loading && returns.length === 0) {
     return <div style={{ display: 'flex', justifyContent: 'center', padding: '40px' }}><LoadingSpinner /></div>;
   }
@@ -186,7 +196,10 @@ export function BottleReturnsPage() {
       <div className="page-header">
         <div>
           <div className="page-title">Bottle Returns</div>
-          <div className="page-sub">{returns.length} records · {pendingCount} pending · {totalBottles} total bottles</div>
+          <div className="page-sub">
+            {Number(stats.total_records).toLocaleString('en-IN')} records ·{' '}
+            {stats.pending_count} pending · {stats.total_bottles} total bottles
+          </div>
         </div>
         <div>
           <Button variant="outline" onClick={handleAutoAssign} disabled={autoAssigning}>
@@ -198,10 +211,10 @@ export function BottleReturnsPage() {
       {/* Summary Cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 20 }}>
         {[
-          { label: 'Total Records', val: returns.length, color: 'var(--text)' },
-          { label: 'Pending / Requested', val: pendingCount, color: 'var(--yellow)' },
-          { label: 'Collected', val: returns.filter(r => r.status === 'collected').length, color: 'var(--green)' },
-          { label: 'Total Bottles', val: totalBottles, color: 'var(--text)' },
+          { label: 'Total Records', val: stats.total_records, color: 'var(--text)' },
+          { label: 'Pending / Requested', val: stats.pending_count, color: 'var(--yellow)' },
+          { label: 'Collected', val: stats.collected_count, color: 'var(--green)' },
+          { label: 'Total Bottles', val: stats.total_bottles, color: 'var(--text)' },
         ].map(s => (
           <div key={s.label} className="card" style={{ padding: '14px 16px', textAlign: 'center' }}>
             <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 4 }}>{s.label}</div>
@@ -216,19 +229,20 @@ export function BottleReturnsPage() {
           className="form-input"
           style={{ width: 160 }}
           value={dateFilter}
-          onChange={e => setDateFilter(e.target.value)}
+          onChange={e => updateFilters({ date: e.target.value })}
           placeholder="Filter by date"
         />
         <Select
           value={statusFilter}
-          onChange={setStatusFilter}
+          onChange={value => updateFilters({ status: value })}
           options={STATUS_FILTERS}
         />
         {(statusFilter !== 'all' || dateFilter) && (
-          <Button size="sm" onClick={() => { setStatusFilter('all'); setDateFilter(''); }}>
+          <Button size="sm" onClick={() => updateFilters({ status: 'all', date: '' })}>
             Clear Filters
           </Button>
         )}
+        <RowsPerLoad />
       </div>
 
       <div className="card" style={{ padding: 0 }}>
@@ -352,6 +366,13 @@ export function BottleReturnsPage() {
             </tbody>
           </table>
         </div>
+        <LoadMore
+          shown={returns.length}
+          total={totalCount}
+          onLoadMore={loadMore}
+          loading={loadingMore}
+          label="returns"
+        />
       </div>
 
       {/* DETAIL DRAWER */}

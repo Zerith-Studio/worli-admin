@@ -1,45 +1,33 @@
 // ============================================
 // FILE: hooks/useHubs.js
-// Hook for fetching and managing hubs
+// Hook for fetching and managing hubs.
+//
+// The list is server-paginated through usePaginatedQuery: hubs is small today,
+// but "small today" is exactly how the other lists ended up silently capped at
+// PostgREST's max-rows ceiling with nobody noticing.
 // ============================================
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
+import { usePaginatedQuery } from './usePaginatedQuery';
 
 export function useHubs() {
-  const [hubs, setHubs] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
-  const mountedRef = useRef(true);
 
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => { mountedRef.current = false; };
-  }, []);
-
-  const fetchHubs = useCallback(async (isBackground = false) => {
-    try {
-      if (!isBackground) setLoading(true);
-      setError(null);
-
-      const { data, error: fetchError } = await supabase
-        .from('hubs')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (fetchError) throw fetchError;
-      if (!mountedRef.current) return;
-      setHubs(data || []);
-    } catch (err) {
-      console.error('Error fetching hubs:', err);
-      if (mountedRef.current) setError(err.message);
-    } finally {
-      if (mountedRef.current) setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { fetchHubs(); }, [fetchHubs]);
+  const {
+    rows: hubs,
+    loading,
+    error,
+    totalCount,
+    loadingMore,
+    hasMore,
+    loadMore,
+    refresh: fetchHubs,
+  } = usePaginatedQuery({
+    table: 'hubs',
+    select: '*',
+    orderBy: { column: 'created_at', ascending: false },
+  });
 
   const createHub = useCallback(async ({ name, address, contact_number }) => {
     try {
@@ -48,7 +36,7 @@ export function useHubs() {
         .from('hubs')
         .insert({ name: name.trim(), address: address?.trim() || null, contact_number: contact_number?.trim() || null });
       if (error) throw error;
-      await fetchHubs();
+      await fetchHubs(true);
       return { success: true };
     } catch (err) {
       return { success: false, error: err.message };
@@ -65,7 +53,7 @@ export function useHubs() {
         .update({ name: name.trim(), address: address?.trim() || null, contact_number: contact_number?.trim() || null })
         .eq('id', id);
       if (error) throw error;
-      await fetchHubs();
+      await fetchHubs(true);
       return { success: true };
     } catch (err) {
       return { success: false, error: err.message };
@@ -81,12 +69,16 @@ export function useHubs() {
         .update({ is_active: !currentValue })
         .eq('id', id);
       if (error) throw error;
-      await fetchHubs();
+      await fetchHubs(true);
       return { success: true };
     } catch (err) {
       return { success: false, error: err.message };
     }
   }, [fetchHubs]);
 
-  return { hubs, loading, error, saving, createHub, updateHub, toggleHubActive, refresh: fetchHubs };
+  return {
+    hubs, loading, error, saving,
+    totalCount, loadingMore, hasMore, loadMore,
+    createHub, updateHub, toggleHubActive, refresh: fetchHubs,
+  };
 }

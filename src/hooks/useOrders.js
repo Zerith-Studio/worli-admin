@@ -1,72 +1,49 @@
 // ============================================
 // FILE: hooks/useOrders.js
-// Added mounted guard to prevent stale setState.
 // ============================================
 
-import { useState, useEffect, useCallback, useRef } from "react"
+import { useCallback } from "react"
 import { supabase } from "../lib/supabase"
-import { withTimeout } from "../lib/query"
 import { throwFunctionError } from "../lib/function-errors"
+import { usePaginatedQuery } from "./usePaginatedQuery"
+import { orLiteral, resolveUserIdsMatching } from "../lib/postgrest"
 
-const PAGE_SIZE = 20
+const SELECT = `
+  *,
+  users!inner(full_name),
+  products!inner(name, volume),
+  addresses!left(address_line1, city, delivery_instructions),
+  subscriptions!left(frequency),
+  route_stops!left(name)
+`
 
 export function useOrders() {
-  const [orders, setOrders] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-  const [page, setPage] = useState(1)
-  const [totalCount, setTotalCount] = useState(0)
-  const [filters, setFilters] = useState({
-    date: new Date().toISOString().split("T")[0],
-    status: "all",
-  })
-  const mountedRef = useRef(true)
+  // Search used to run in JS over the current page, so it only ever looked at
+  // 20 of the day's orders. It has to be a server filter to mean anything.
+  //
+  // order_number lives on `orders`, but the customer's name lives on the
+  // EMBEDDED users row — and PostgREST can't OR a parent column against an
+  // embedded one in a single logic tree (it rejects the whole filter). So the
+  // customer half is resolved to ids first, here, and OR'd in as user_id below.
+  const prepare = async (filters) => {
+    const search = filters.search?.trim()
+    if (!search) return null
+    return { search, userIds: await resolveUserIdsMatching(search) }
+  }
 
-  useEffect(() => {
-    mountedRef.current = true
-    return () => {
-      mountedRef.current = false
+  const applyFilters = (query, filters, prepared) => {
+    if (filters.date) query = query.eq("delivery_date", filters.date)
+    if (filters.status !== "all") query = query.eq("status", filters.status)
+
+    if (prepared) {
+      const clauses = [`order_number.ilike.${orLiteral(`%${prepared.search}%`)}`]
+      if (prepared.userIds.length) clauses.push(`user_id.in.(${prepared.userIds.join(",")})`)
+      query = query.or(clauses.join(","))
     }
-  }, [])
+    return query
+  }
 
-  const fetchOrders = useCallback(async (isBackground = false) => {
-    try {
-      console.log(
-        `[useOrders] fetchOrders started. mountedRef=${mountedRef.current}`,
-      )
-      if (!isBackground) setLoading(true)
-      setError(null)
-
-      let query = supabase.from("orders").select(
-        `
-          *,
-          users!inner(full_name),
-          products!inner(name, volume),
-          addresses!left(address_line1, city, delivery_instructions),
-          subscriptions!left(frequency),
-          route_stops!left(name)
-        `,
-        { count: "exact" },
-      )
-
-      if (filters.date) query = query.eq("delivery_date", filters.date)
-      if (filters.status !== "all") query = query.eq("status", filters.status)
-
-      const from = (page - 1) * PAGE_SIZE
-      const to = from + PAGE_SIZE - 1
-
-      const {
-        data,
-        error: fetchError,
-        count,
-      } = await withTimeout(query.range(from, to).order("created_at", { ascending: false }))
-
-      if (fetchError) throw fetchError
-      if (!mountedRef.current) {
-        console.log("[useOrders] unmounted after orders fetch, aborting")
-        return
-      }
-
+  const transform = useCallback(async (data) => {
       const transformedData =
         data?.map((order) => ({
           id: order.id,
@@ -136,25 +113,32 @@ export function useOrders() {
         )
       }
 
-      setOrders(transformedData)
-      setTotalCount(count || 0)
-      console.log("[useOrders] fetchOrders transformed data successfully")
-    } catch (err) {
-      console.error("[useOrders] Error fetching orders:", err)
-      if (mountedRef.current) setError(err.message)
-    } finally {
-      console.log(`[useOrders] finally block. mountedRef=${mountedRef.current}`)
-      if (mountedRef.current) {
-        console.log("[useOrders] Setting loading: false")
-        setLoading(false)
-      }
-    }
-  }, [page, filters])
+      return transformedData
+  }, [])
 
-  useEffect(() => {
-    console.log("[useOrders] initial useEffect triggering fetchOrders")
-    fetchOrders()
-  }, [fetchOrders])
+  const {
+    rows: orders,
+    loading,
+    error,
+    totalCount,
+    loadingMore,
+    hasMore,
+    loadMore,
+    filters,
+    updateFilters,
+    refresh: fetchOrders,
+  } = usePaginatedQuery({
+    table: "orders",
+    select: SELECT,
+    initialFilters: {
+      date: new Date().toISOString().split("T")[0],
+      status: "all",
+      search: "",
+    },
+    prepare,
+    applyFilters,
+    transform,
+  })
 
   const updateOrderStatus = useCallback(
     async (id, newStatus, additionalData = {}) => {
@@ -292,26 +276,16 @@ export function useOrders() {
     }
   }, [fetchOrders])
 
-  const updateFilters = useCallback((newFilters) => {
-    setFilters((prev) => ({ ...prev, ...newFilters }))
-    setPage(1)
-  }, [])
-
-  const goToPage = useCallback((newPage) => {
-    setPage(newPage)
-  }, [])
-  const totalPages = Math.ceil(totalCount / PAGE_SIZE)
-
   return {
     orders,
     loading,
     error,
-    page,
-    totalPages,
     totalCount,
+    loadingMore,
+    hasMore,
+    loadMore,
     filters,
     updateFilters,
-    goToPage,
     updateOrderStatus,
     updateOrderNotes,
     reassignDriver,

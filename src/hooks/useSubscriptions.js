@@ -1,92 +1,38 @@
 // ============================================
 // FILE: hooks/useSubscriptions.js
-// Fixed: default status=active, working search via 2-step user
-// query, pagination, mounted guard.
 // ============================================
 
-import { useState, useEffect, useCallback, useRef } from "react"
+import { useCallback } from "react"
 import { supabase } from "../lib/supabase"
-import { withTimeout } from "../lib/query"
+import { usePaginatedQuery, NO_MATCHES } from "./usePaginatedQuery"
+import { resolveUserIdsMatching } from "../lib/postgrest"
 
-const PAGE_SIZE = 15
+const SELECT = `
+  *,
+  users!inner(full_name, phone_number),
+  products!inner(name, volume, price),
+  addresses!left(city)
+`
 
 export function useSubscriptions() {
-  const [subscriptions, setSubscriptions] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-  const [page, setPage] = useState(1)
-  const [totalCount, setTotalCount] = useState(0)
-  const [filters, setFilters] = useState({
-    search: "",
-    type: "all",
-    status: "active", // default to active
-  })
-  const mountedRef = useRef(true)
+  // PostgREST can't ilike an embedded table's column inside this query's
+  // filter, so the customer half of the search resolves to ids first.
+  // resolveUserIdsMatching quotes the term (an unquoted `,` or `(` breaks the
+  // whole logic tree) and caps the id list, neither of which this did before.
+  const prepare = async (filters) => {
+    if (!filters.search) return null
+    const userIds = await resolveUserIdsMatching(filters.search)
+    return userIds.length === 0 ? NO_MATCHES : { userIds }
+  }
 
-  useEffect(() => {
-    mountedRef.current = true
-    return () => {
-      mountedRef.current = false
-    }
-  }, [])
+  const applyFilters = (query, filters, prepared) => {
+    if (filters.type !== "all") query = query.eq("frequency", filters.type)
+    if (filters.status !== "all") query = query.eq("status", filters.status)
+    if (prepared) query = query.in("user_id", prepared.userIds)
+    return query
+  }
 
-  const fetchSubscriptions = useCallback(async (isBackground = false) => {
-    try {
-      console.log(
-        `[useSubscriptions] fetch started. mounted=${mountedRef.current}`,
-      )
-      if (!isBackground) setLoading(true)
-      setError(null)
-
-      let query = supabase.from("subscriptions").select(
-        `
-          *,
-          users!inner(full_name, phone_number),
-          products!inner(name, volume, price),
-          addresses!left(city)
-        `,
-        { count: "exact" },
-      )
-
-      if (filters.type !== "all") query = query.eq("frequency", filters.type)
-      if (filters.status !== "all") query = query.eq("status", filters.status)
-
-      // Search filter: PostgREST can't ilike on joined tables,
-      // so we resolve user IDs first.
-      let userIdFilter = null
-      if (filters.search) {
-        const { data: matchedUsers } = await supabase
-          .from("users")
-          .select("id")
-          .or(
-            `full_name.ilike.%${filters.search}%,phone_number.ilike.%${filters.search}%`,
-          )
-
-        userIdFilter = matchedUsers?.map((u) => u.id) || []
-        if (userIdFilter.length === 0) {
-          if (mountedRef.current) {
-            setSubscriptions([])
-            setTotalCount(0)
-            setLoading(false)
-          }
-          return
-        }
-      }
-
-      if (userIdFilter !== null) query = query.in("user_id", userIdFilter)
-
-      const from = (page - 1) * PAGE_SIZE
-      const to = from + PAGE_SIZE - 1
-
-      const {
-        data,
-        error: fetchError,
-        count,
-      } = await withTimeout(query.range(from, to).order("created_at", { ascending: false }))
-
-      if (fetchError) throw fetchError
-      if (!mountedRef.current) return
-
+  const transform = useCallback(async (data) => {
       const transformedData =
         data?.map((sub) => ({
           id: sub.id,
@@ -130,24 +76,28 @@ export function useSubscriptions() {
         transformedData.forEach(s => { s.activePause = holdsMap[s.id] || null })
       }
 
-      setSubscriptions(transformedData)
-      setTotalCount(count || 0)
-      console.log("[useSubscriptions] fetch success")
-    } catch (err) {
-      console.error("Error fetching subscriptions:", err)
-      if (mountedRef.current) setError(err.message)
-    } finally {
-      if (mountedRef.current) {
-        console.log("[useSubscriptions] Setting loading: false")
-        setLoading(false)
-      }
-    }
-  }, [page, filters])
+      return transformedData
+  }, [])
 
-  useEffect(() => {
-    console.log("[useSubscriptions] initial fetch")
-    fetchSubscriptions()
-  }, [fetchSubscriptions])
+  const {
+    rows: subscriptions,
+    loading,
+    error,
+    totalCount,
+    loadingMore,
+    hasMore,
+    loadMore,
+    filters,
+    updateFilters,
+    refresh: fetchSubscriptions,
+  } = usePaginatedQuery({
+    table: "subscriptions",
+    select: SELECT,
+    initialFilters: { search: "", type: "all", status: "active" },
+    prepare,
+    applyFilters,
+    transform,
+  })
 
   const updateSubscriptionStatus = useCallback(
     async (id, newStatus, holdData = null) => {
@@ -185,26 +135,16 @@ export function useSubscriptions() {
     [fetchSubscriptions],
   )
 
-  const updateFilters = useCallback((newFilters) => {
-    setFilters((prev) => ({ ...prev, ...newFilters }))
-    setPage(1)
-  }, [])
-
-  const goToPage = useCallback((newPage) => {
-    setPage(newPage)
-  }, [])
-  const totalPages = Math.ceil(totalCount / PAGE_SIZE)
-
   return {
     subscriptions,
     loading,
     error,
-    page,
-    totalPages,
     totalCount,
+    loadingMore,
+    hasMore,
+    loadMore,
     filters,
     updateFilters,
-    goToPage,
     updateSubscriptionStatus,
     refresh: fetchSubscriptions,
   }

@@ -8,9 +8,11 @@
 import React, { useState } from 'react';
 import { useCustomers } from '../../hooks/useCustomers';
 import { useDataRefresh } from '../../hooks/useDataRefresh';
+import { useDebouncedSearch } from '../../hooks/useDebouncedValue';
 import { SearchInput } from '../ui/SearchInput';
 import { Select } from '../ui/Select';
-import { Pagination } from '../ui/Pagination';
+import { LoadMore } from '../ui/LoadMore';
+import { RowsPerLoad } from '../ui/RowsPerLoad';
 import { StatusBadge } from '../ui/StatusBadge';
 import { Modal } from '../ui/Modal';
 import { Button } from '../ui/Button';
@@ -28,9 +30,13 @@ const STATUSES = [
 
 export function CustomersPage() {
   const {
-    customers, loading, error, page, totalPages, totalCount,
-    filters, minWalletBalance, updateFilters, goToPage, triggerAutoRecharge, updateUserStatus, refresh,
+    customers, loading, error, totalCount, loadingMore, loadMore,
+    filters, minWalletBalance, updateFilters, triggerAutoRecharge, updateUserStatus, refresh,
   } = useCustomers();
+
+  // Search is a server filter, so it waits for a typing pause rather than
+  // firing a query per keystroke.
+  const [search, setSearch] = useDebouncedSearch(updateFilters);
 
   const [viewUserId, setViewUserId] = useState(null);
   const [rechargeCustomer, setRechargeCustomer] = useState(null);
@@ -110,14 +116,15 @@ export function CustomersPage() {
       <div className="search-filter">
         <SearchInput
           placeholder="Search name or phone..."
-          value={filters.search}
-          onChange={value => updateFilters({ search: value })}
+          value={search}
+          onChange={setSearch}
         />
         <Select
           value={filters.status}
           onChange={value => updateFilters({ status: value })}
           options={STATUSES}
         />
+        <RowsPerLoad />
       </div>
 
       <div className="card" style={{ padding: 0 }}>
@@ -183,7 +190,13 @@ export function CustomersPage() {
             </tbody>
           </table>
         </div>
-        <Pagination page={page} totalPages={totalPages} onPageChange={goToPage} />
+        <LoadMore
+          shown={customers.length}
+          total={totalCount}
+          onLoadMore={loadMore}
+          loading={loadingMore}
+          label="customers"
+        />
       </div>
 
       {/* Unified customer sheet */}

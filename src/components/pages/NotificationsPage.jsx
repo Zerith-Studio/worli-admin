@@ -6,9 +6,13 @@
 import React, { useState, useEffect, useCallback, useRef } from "react"
 import { supabase } from "../../lib/supabase"
 import { getFunctionErrorMessage } from "../../lib/function-errors"
+import { userSearchClause } from "../../lib/postgrest"
+import { usePaginatedQuery } from "../../hooks/usePaginatedQuery"
 import { Button } from "../ui/Button"
 import { Modal } from "../ui/Modal"
 import { Drawer } from "../ui/Drawer"
+import { LoadMore } from "../ui/LoadMore"
+import { RowsPerLoad } from "../ui/RowsPerLoad"
 
 // ─── Image upload (mirrors ProductsPage pattern) ──────────────
 const NOTIF_BUCKET = "notification-images"
@@ -98,10 +102,12 @@ function UserSearch({ selectedUsers, onSelectionChange }) {
   const handleSearch = useCallback(async (q) => {
     if (!q || q.length < 2) { setResults([]); return }
     setSearching(true)
+    // Quoted via userSearchClause: an unquoted `,` or `.` in the box makes
+    // PostgREST reject the whole logic tree, not just miss.
     const { data } = await supabase
       .from("users")
       .select("id, full_name, phone_number, expo_push_token")
-      .or(`full_name.ilike.%${q}%,phone_number.ilike.%${q}%`)
+      .or(userSearchClause(q))
       .limit(10)
     setResults(data || [])
     setSearching(false)
@@ -287,8 +293,19 @@ function NotificationDetailDrawer({ notif, onClose }) {
 
 // ─── Main Page ────────────────────────────────────────────────
 export function NotificationsPage() {
-  const [notifications, setNotifications] = useState([])
-  const [loading, setLoading] = useState(true)
+  // History is append-only — one row per send, forever — so the old .limit(50)
+  // was a truncation with no way to see past it.
+  const {
+    rows: notifications,
+    loading,
+    totalCount, loadingMore, loadMore,
+    refresh: fetchHistory,
+  } = usePaginatedQuery({
+    table: "push_notifications",
+    select: "*",
+    orderBy: { column: "created_at", ascending: false },
+  })
+
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [sending, setSending] = useState(false)
   const [sendResult, setSendResult] = useState(null)
@@ -343,20 +360,6 @@ export function NotificationsPage() {
     if (fileInputRef.current) fileInputRef.current.value = ""
   }
 
-  // ── Fetch sent history ──────────────────────────────────────
-  const fetchHistory = async () => {
-    setLoading(true)
-    const { data } = await supabase
-      .from("push_notifications")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(50)
-    setNotifications(data || [])
-    setLoading(false)
-  }
-
-  useEffect(() => { fetchHistory() }, [])
-
   // ── Send notification ───────────────────────────────────────
   const handleSend = async () => {
     if (!form.title.trim() || !form.body.trim()) {
@@ -402,7 +405,7 @@ export function NotificationsPage() {
       setSendResult({ ok: true, sent: data.sent, failed: data.failed })
       setIsModalOpen(false)
       setForm(defaultForm)
-      fetchHistory()
+      fetchHistory(true)
     }
   }
 
@@ -416,7 +419,7 @@ export function NotificationsPage() {
       alert("Error: " + (await getFunctionErrorMessage(error, data)))
     } else {
       alert(`✅ Notified ${data.notified} users (${data.failed ?? 0} failed)`)
-      fetchHistory()
+      fetchHistory(true)
     }
   }
 
@@ -444,8 +447,11 @@ export function NotificationsPage() {
       </div>
 
       {/* Sent history */}
+      <div className="search-filter">
+        <RowsPerLoad />
+      </div>
       <div className="card">
-        {loading ? (
+        {loading && notifications.length === 0 ? (
           <div style={{ padding: 24, textAlign: "center", color: "var(--text-3)" }}>Loading…</div>
         ) : notifications.length === 0 ? (
           <div style={{ padding: 32, textAlign: "center", color: "var(--text-3)" }}>
@@ -512,6 +518,13 @@ export function NotificationsPage() {
             </tbody>
           </table>
         )}
+        <LoadMore
+          shown={notifications.length}
+          total={totalCount}
+          onLoadMore={loadMore}
+          loading={loadingMore}
+          label="notifications"
+        />
       </div>
 
       {/* Notification detail drawer — shows every field from push_notifications */}

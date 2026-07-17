@@ -1,9 +1,12 @@
-import React, { useState, useEffect, useCallback, useRef } from "react"
+import React, { useState, useRef } from "react"
 import { supabase } from "../../lib/supabase"
 import { Badge } from "../ui/Badge"
 import { Button } from "../ui/Button"
 import { Modal } from "../ui/Modal"
 import { LoadingSpinner } from "../ui/LoadingSpinner"
+import { LoadMore } from "../ui/LoadMore"
+import { RowsPerLoad } from "../ui/RowsPerLoad"
+import { usePaginatedQuery } from "../../hooks/usePaginatedQuery"
 
 const BUCKET = "product-images"
 
@@ -51,9 +54,17 @@ function getInitialForm() {
 
 // ─── Component ─────────────────────────────────────────────────────────────────
 export function ProductsPage() {
-  const [products, setProducts] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
+  const {
+    rows: products,
+    loading,
+    error,
+    totalCount, loadingMore, loadMore,
+    refresh: fetchProducts,
+  } = usePaginatedQuery({
+    table: "products",
+    select: "*",
+    orderBy: { column: "created_at", ascending: false },
+  })
 
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [currentProduct, setCurrentProduct] = useState(null)
@@ -66,26 +77,6 @@ export function ProductsPage() {
 
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState(null)
-
-  // ── Fetch ────────────────────────────────────────────────────────────────────
-  const fetchProducts = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const { data, error: err } = await supabase
-        .from("products")
-        .select("*")
-        .order("created_at", { ascending: false })
-      if (err) throw err
-      setProducts(data || [])
-    } catch (e) {
-      setError(e.message)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { fetchProducts() }, [fetchProducts])
 
   // ── Open / Close Modal ───────────────────────────────────────────────────────
   const openModal = (product = null) => {
@@ -259,21 +250,28 @@ export function ProductsPage() {
   }
 
   // ── Render ───────────────────────────────────────────────────────────────────
+  if (loading && products.length === 0) {
+    return <div style={{ padding: 40, display: "flex", justifyContent: "center" }}><LoadingSpinner /></div>
+  }
+
   return (
     <div>
       <div className="page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div>
           <div className="page-title">Products</div>
-          <div className="page-sub">{products.length} products</div>
+          <div className="page-sub">{totalCount.toLocaleString("en-IN")} products</div>
         </div>
         <Button variant="primary" onClick={() => openModal()}>+ Add Product</Button>
       </div>
 
-      {loading && <div style={{ padding: 40, display: "flex", justifyContent: "center" }}><LoadingSpinner /></div>}
       {error && <div className="card" style={{ color: "var(--red)", padding: 20 }}>Error: {error}</div>}
 
-      {!loading && !error && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 16, marginTop: 8 }}>
+      {!error && (
+        <>
+          <div className="search-filter">
+            <RowsPerLoad />
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 16, marginTop: 8 }}>
           {products.map(product => (
             <div key={product.id} className="card" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               {/* Image */}
@@ -329,7 +327,15 @@ export function ProductsPage() {
               </div>
             </div>
           ))}
-        </div>
+          </div>
+          <LoadMore
+            shown={products.length}
+            total={totalCount}
+            onLoadMore={loadMore}
+            loading={loadingMore}
+            label="products"
+          />
+        </>
       )}
 
       {/* ── Modal ──────────────────────────────────────────────────────────── */}

@@ -6,17 +6,25 @@
 import React, { useState } from 'react';
 import { useWalletStats } from '../../hooks/useWalletStats';
 import { useDataRefresh } from '../../hooks/useDataRefresh';
+import { useDebouncedSearch } from '../../hooks/useDebouncedValue';
 import { SearchInput } from '../ui/SearchInput';
 import { Select } from '../ui/Select';
 import { Button } from '../ui/Button';
 import { ProgressBar } from '../ui/ProgressBar';
 import { LoadingSpinner } from '../ui/LoadingSpinner';
+import { LoadMore } from '../ui/LoadMore';
+import { RowsPerLoad } from '../ui/RowsPerLoad';
 
 export function WalletPage() {
   const {
-    customers, stats, loading, error, filters, minWalletBalance,
+    customers, stats, loading, error, totalCount, loadingMore, loadMore,
+    filters, minWalletBalance,
     updateFilters, addCredit, refresh,
   } = useWalletStats();
+
+  // Searching by customer name costs two round trips (name → user ids →
+  // wallets), so this waits for a typing pause rather than firing per keystroke.
+  const [search, setSearch] = useDebouncedSearch(updateFilters);
 
   const [creditModal, setCreditModal] = useState(null);
   const [creditForm, setCreditForm] = useState({ amount: '', reason: '' });
@@ -85,14 +93,15 @@ export function WalletPage() {
       <div className="search-filter">
         <SearchInput
           placeholder="Search customer..."
-          value={filters.search}
-          onChange={value => updateFilters({ search: value })}
+          value={search}
+          onChange={setSearch}
         />
         <Select
           value={filters.riskLevel}
           onChange={value => updateFilters({ riskLevel: value })}
           options={RISK_LEVELS}
         />
+        <RowsPerLoad />
       </div>
 
       <div className="card" style={{ padding: 0 }}>
@@ -160,6 +169,13 @@ export function WalletPage() {
             </tbody>
           </table>
         </div>
+        <LoadMore
+          shown={customers.length}
+          total={totalCount}
+          onLoadMore={loadMore}
+          loading={loadingMore}
+          label="customers"
+        />
       </div>
 
       {creditModal && (

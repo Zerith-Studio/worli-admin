@@ -1,18 +1,19 @@
 // ============================================
 // FILE: hooks/useRoutes.js
 // Added createRoute, updateRoute, toggleRouteActive mutations.
-// Mounted guard added.
+//
+// The route list is server-paginated through usePaginatedQuery. The rider
+// resolution that used to run over every route now runs inside `transform`, so
+// it only asks about the ~20 routes on the current page instead of pulling the
+// whole rider_routes table on every refresh.
 // ============================================
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
-import { withTimeout } from '../lib/query';
+import { usePaginatedQuery } from './usePaginatedQuery';
 
 export function useRoutes() {
-  const [routes, setRoutes] = useState([]);
   const [hubs, setHubs] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
   const mountedRef = useRef(true);
 
@@ -21,30 +22,45 @@ export function useRoutes() {
     return () => { mountedRef.current = false; };
   }, []);
 
-  const fetchRoutes = useCallback(async (isBackground = false) => {
-    try {
-      if (!isBackground) setLoading(true);
-      setError(null);
+  // Hubs feed the create/edit dropdown, not the table — bounded by the active
+  // hub count and independent of which page of routes is on screen.
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase
+        .from('hubs').select('id, name').eq('is_active', true).order('name');
+      if (mountedRef.current && data) setHubs(data);
+    })();
+  }, []);
 
-      // Fetch hubs for dropdowns
-      const { data: hubsData } = await supabase.from('hubs').select('id, name').eq('is_active', true).order('name');
-      if (mountedRef.current && hubsData) setHubs(hubsData);
+  const {
+    rows: routes,
+    loading,
+    error,
+    totalCount,
+    loadingMore,
+    hasMore,
+    loadMore,
+    refresh: fetchRoutes,
+  } = usePaginatedQuery({
+    table: 'routes',
+    select: '*, hubs(name)',
+    orderBy: { column: 'created_at', ascending: false },
+    transform: async (routesData) => {
+      if (routesData.length === 0) return [];
 
-      const { data: routesData, error: routesError } = await withTimeout(
-        supabase.from('routes').select('*, hubs(name)')
-      );
-      if (routesError) throw routesError;
-
-      // Fetch rider assignments: permanent (assigned_date IS NULL) + today's overrides.
+      // Rider assignments for THIS page's routes: permanent (assigned_date IS
+      // NULL) + today's overrides.
       const today = new Date().toISOString().split('T')[0];
+      const routeIds = routesData.map(r => r.id);
       const { data: riderRoutesData } = await supabase
         .from('rider_routes')
         .select('route_id, rider_id, assigned_date')
+        .in('route_id', routeIds)
         .or(`assigned_date.is.null,assigned_date.eq.${today}`);
 
       // Resolve rider names
       const riderIds = [...new Set(riderRoutesData?.map(rr => rr.rider_id) || [])];
-      let usersMap = {};
+      const usersMap = {};
       if (riderIds.length > 0) {
         const { data: usersData } = await supabase
           .from('users').select('id, full_name').in('id', riderIds);
@@ -59,7 +75,7 @@ export function useRoutes() {
         else overrideMap[rr.route_id] = rr.rider_id;
       });
 
-      const transformedData = routesData?.map(route => {
+      return routesData.map(route => {
         const effectiveRiderId = overrideMap[route.id] ?? permMap[route.id] ?? null;
         return {
           id: route.id,
@@ -72,19 +88,9 @@ export function useRoutes() {
           driverName: effectiveRiderId ? (usersMap[effectiveRiderId]?.full_name || 'Unassigned') : 'Unassigned',
           isOverriddenToday: overrideMap[route.id] != null,
         };
-      }) || [];
-
-      if (!mountedRef.current) return;
-      setRoutes(transformedData);
-    } catch (err) {
-      console.error('Error fetching routes:', err);
-      if (mountedRef.current) setError(err.message);
-    } finally {
-      if (mountedRef.current) setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { fetchRoutes(); }, [fetchRoutes]);
+      });
+    },
+  });
 
   const createRoute = useCallback(async ({ name, hub_id, description }) => {
     try {
@@ -96,7 +102,7 @@ export function useRoutes() {
         is_active: true,
       });
       if (error) throw error;
-      await fetchRoutes();
+      await fetchRoutes(true);
       return { success: true };
     } catch (err) {
       return { success: false, error: err.message };
@@ -114,7 +120,7 @@ export function useRoutes() {
         description: description?.trim() || null,
       }).eq('id', id);
       if (error) throw error;
-      await fetchRoutes();
+      await fetchRoutes(true);
       return { success: true };
     } catch (err) {
       return { success: false, error: err.message };
@@ -127,7 +133,7 @@ export function useRoutes() {
     try {
       const { error } = await supabase.from('routes').update({ is_active: !currentValue }).eq('id', id);
       if (error) throw error;
-      await fetchRoutes();
+      await fetchRoutes(true);
       return { success: true };
     } catch (err) {
       return { success: false, error: err.message };
@@ -141,7 +147,7 @@ export function useRoutes() {
         p_route_id: routeId, p_rider_id: riderId,
       });
       if (error) throw error;
-      await fetchRoutes();
+      await fetchRoutes(true);
       return { success: true };
     } catch (err) {
       return { success: false, error: err.message };
@@ -150,6 +156,7 @@ export function useRoutes() {
 
   return {
     routes, hubs, loading, error, saving,
+    totalCount, loadingMore, hasMore, loadMore,
     createRoute, updateRoute, toggleRouteActive, assignDriver,
     refresh: fetchRoutes,
   };

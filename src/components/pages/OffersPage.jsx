@@ -4,6 +4,9 @@ import { Badge } from "../ui/Badge"
 import { Button } from "../ui/Button"
 import { Modal } from "../ui/Modal"
 import { LoadingSpinner } from "../ui/LoadingSpinner"
+import { LoadMore } from "../ui/LoadMore"
+import { RowsPerLoad } from "../ui/RowsPerLoad"
+import { usePaginatedQuery } from "../../hooks/usePaginatedQuery"
 
 function getInitialForm() {
   return {
@@ -26,10 +29,19 @@ function formatDateTimeLocal(isoString) {
 }
 
 export function OffersPage() {
-  const [offers, setOffers] = useState([])
   const [discounts, setDiscounts] = useState([]) // for the dropdown
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
+
+  const {
+    rows: offers,
+    loading,
+    error,
+    totalCount, loadingMore, loadMore,
+    refresh: fetchOffers,
+  } = usePaginatedQuery({
+    table: "offers",
+    select: "*, discounts(code, description)",
+    orderBy: { column: "display_order", ascending: true },
+  })
 
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [currentOffer, setCurrentOffer] = useState(null)
@@ -37,23 +49,21 @@ export function OffersPage() {
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState(null)
 
-  // ── Fetch ──────────────────────────────────────────────────────────────────
-  const fetchOffers = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const { data, error: err } = await supabase
+  // The "N active" figure describes the whole table, not the loaded page, so it
+  // comes from a count query rather than from filtering the fetched rows.
+  const [activeCount, setActiveCount] = useState(0)
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      const { count, error: countErr } = await supabase
         .from("offers")
-        .select("*, discounts(code, description)")
-        .order("display_order", { ascending: true })
-      if (err) throw err
-      setOffers(data || [])
-    } catch (e) {
-      setError(e.message)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+        .select("id", { count: "exact", head: true })
+        .eq("is_active", true)
+      if (countErr) { console.error("[Offers] active count failed", countErr); return }
+      if (!cancelled) setActiveCount(count ?? 0)
+    })()
+    return () => { cancelled = true }
+  }, [offers])
 
   const fetchDiscounts = useCallback(async () => {
     const { data } = await supabase
@@ -65,9 +75,8 @@ export function OffersPage() {
   }, [])
 
   useEffect(() => {
-    fetchOffers()
     fetchDiscounts()
-  }, [fetchOffers, fetchDiscounts])
+  }, [fetchDiscounts])
 
   // ── Open / Close ───────────────────────────────────────────────────────────
   const openModal = (offer = null) => {
@@ -154,22 +163,27 @@ export function OffersPage() {
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
-  const activeCount = offers.filter(o => o.is_active).length
+  if (loading && offers.length === 0) {
+    return <div style={{ padding: 40, display: "flex", justifyContent: "center" }}><LoadingSpinner /></div>
+  }
 
   return (
     <div>
       <div className="page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div>
           <div className="page-title">Offers &amp; Creatives</div>
-          <div className="page-sub">{activeCount} active · {offers.length} total</div>
+          <div className="page-sub">{activeCount} active · {totalCount.toLocaleString("en-IN")} total</div>
         </div>
         <Button variant="primary" onClick={() => openModal()}>+ Add Offer</Button>
       </div>
 
-      {loading && <div style={{ padding: 40, display: "flex", justifyContent: "center" }}><LoadingSpinner /></div>}
       {error && <div className="card" style={{ color: "var(--red)", padding: 20 }}>Error: {error}</div>}
 
-      {!loading && !error && (
+      {!error && (
+        <>
+        <div className="search-filter">
+          <RowsPerLoad />
+        </div>
         <div className="card">
           <table className="data-table">
             <thead>
@@ -236,7 +250,15 @@ export function OffersPage() {
               ))}
             </tbody>
           </table>
+          <LoadMore
+            shown={offers.length}
+            total={totalCount}
+            onLoadMore={loadMore}
+            loading={loadingMore}
+            label="offers"
+          />
         </div>
+        </>
       )}
 
       {/* ── Modal ─────────────────────────────────────────────────────────── */}

@@ -10,11 +10,17 @@ import { Button } from '../ui/Button';
 import { StatusBadge } from '../ui/StatusBadge';
 import { Modal } from '../ui/Modal';
 import { LoadingSpinner } from '../ui/LoadingSpinner';
+import { LoadMore } from '../ui/LoadMore';
+import { RowsPerLoad } from '../ui/RowsPerLoad';
 
 const EMPTY_FORM = { name: '', address: '', contact_number: '' };
 
 export function HubsPage() {
-  const { hubs, loading, error, saving, createHub, updateHub, toggleHubActive, refresh } = useHubs();
+  const {
+    hubs, loading, error, saving,
+    totalCount, loadingMore, loadMore,
+    createHub, updateHub, toggleHubActive, refresh,
+  } = useHubs();
   const [modal, setModal] = useState(null); // null | { mode: 'create' | 'edit', hub?: {} }
   const [form, setForm] = useState(EMPTY_FORM);
   const [formError, setFormError] = useState('');
@@ -50,9 +56,13 @@ export function HubsPage() {
       <div className="page-header" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
         <div>
           <div className="page-title">Hubs</div>
-          <div className="page-sub">{hubs.length} fulfillment hubs</div>
+          <div className="page-sub">{totalCount.toLocaleString('en-IN')} fulfillment hubs</div>
         </div>
         <Button variant="primary" onClick={openCreate}>+ Add Hub</Button>
+      </div>
+
+      <div className="search-filter">
+        <RowsPerLoad />
       </div>
 
       <div className="card" style={{ padding: 0 }}>
@@ -95,6 +105,13 @@ export function HubsPage() {
             </tbody>
           </table>
         </div>
+        <LoadMore
+          shown={hubs.length}
+          total={totalCount}
+          onLoadMore={loadMore}
+          loading={loadingMore}
+          label="hubs"
+        />
       </div>
 
       {modal && (
