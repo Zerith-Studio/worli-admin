@@ -64,6 +64,69 @@ export function ServiceAreaPage() {
     return () => { cancelled = true; };
   }, [pincodes]);
 
+  // ─── Requested areas ────────────────────────────────────────────────────
+  // Demand logged by people whose pincode we don't cover. Read from the grouped
+  // view so one row = one pincode rather than one row per person.
+  const {
+    rows: requests,
+    totalCount: requestsTotal,
+    loadingMore: requestsLoadingMore,
+    loadMore: loadMoreRequests,
+    refresh: refreshRequests,
+  } = usePaginatedQuery({
+    table: 'service_area_request_summary',
+    select: '*',
+    // Most-wanted first. `tiebreak` must be overridden: the default is `id`,
+    // and a grouped view has no id column — the query would just error.
+    orderBy: [{ column: 'request_count', ascending: false }],
+    tiebreak: 'pincode',
+    getRowId: (r) => r?.pincode,
+  });
+
+  const [busyPincode, setBusyPincode] = useState(null);
+  const [contacts, setContacts] = useState({});
+
+  const promoteRequest = async (row) => {
+    setBusyPincode(row.pincode);
+    try {
+      const { error: err } = await supabase.from('serviceable_pincodes')
+        .upsert({ pincode: row.pincode, is_active: true }, { onConflict: 'pincode' });
+      if (err) throw err;
+      await supabase.from('service_area_requests')
+        .update({ status: 'serviced' }).eq('pincode', row.pincode).eq('status', 'pending');
+      await Promise.all([fetchData(), refreshRequests()]);
+    } catch (err) {
+      setFormError(err.message);
+    } finally {
+      setBusyPincode(null);
+    }
+  };
+
+  const ignoreRequest = async (row) => {
+    setBusyPincode(row.pincode);
+    try {
+      await supabase.from('service_area_requests')
+        .update({ status: 'ignored' }).eq('pincode', row.pincode).eq('status', 'pending');
+      await refreshRequests();
+    } finally {
+      setBusyPincode(null);
+    }
+  };
+
+  // Phone numbers are the point of collecting them, so they have to be
+  // reachable from here — the grouped view only carries a count.
+  const toggleContacts = async (pincode) => {
+    if (contacts[pincode]) { setContacts(p => ({ ...p, [pincode]: null })); return; }
+    const { data } = await supabase
+      .from('service_area_requests')
+      .select('phone_number, created_at')
+      .eq('pincode', pincode)
+      .not('phone_number', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(50);
+    setContacts(p => ({ ...p, [pincode]: data ?? [] }));
+  };
+
   const handleAdd = async () => {
     const pin = form.pincode.trim();
     if (!/^\d{6}$/.test(pin)) { setFormError('Pincode must be exactly 6 digits.'); return; }
@@ -206,6 +269,107 @@ export function ServiceAreaPage() {
           onLoadMore={loadMore}
           loading={loadingMore}
           label="pincodes"
+        />
+      </div>
+
+      {/* Requested areas */}
+      <div className="page-header" style={{ marginTop: 28 }}>
+        <div className="page-title" style={{ fontSize: 18 }}>Requested Areas</div>
+        <div className="page-sub">
+          {requestsTotal.toLocaleString('en-IN')} pincodes people asked for but we don&apos;t deliver to
+        </div>
+      </div>
+
+      <div className="card" style={{ padding: 0 }}>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Pincode</th>
+                <th>Requests</th>
+                <th>People</th>
+                <th>Contacts</th>
+                <th>Last asked</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {requests.length === 0 ? (
+                <tr><td colSpan={7} style={{ textAlign: 'center', padding: 24, color: 'var(--text-4)' }}>
+                  No requests yet. They appear here when someone enters a pincode you don&apos;t cover.
+                </td></tr>
+              ) : requests.map(row => (
+                <React.Fragment key={row.pincode}>
+                  <tr>
+                    <td style={{ fontWeight: 600, fontFamily: "'DM Mono',monospace" }}>{row.pincode}</td>
+                    <td>{Number(row.request_count).toLocaleString('en-IN')}</td>
+                    <td style={{ fontSize: 12, color: 'var(--text-3)' }}>
+                      {Number(row.device_count).toLocaleString('en-IN')}
+                      {Number(row.from_logged_in) > 0 && ` · ${row.from_logged_in} signed in`}
+                    </td>
+                    <td>
+                      {Number(row.with_phone) > 0 ? (
+                        <Button size="sm" onClick={() => toggleContacts(row.pincode)}>
+                          {contacts[row.pincode] ? 'Hide' : `${row.with_phone} number${Number(row.with_phone) === 1 ? '' : 's'}`}
+                        </Button>
+                      ) : (
+                        <span style={{ fontSize: 12, color: 'var(--text-4)' }}>—</span>
+                      )}
+                    </td>
+                    <td style={{ fontSize: 12, color: 'var(--text-3)' }}>
+                      {row.last_requested_at
+                        ? new Date(row.last_requested_at).toLocaleDateString('en-IN', {
+                            day: 'numeric', month: 'short', year: 'numeric',
+                          })
+                        : '—'}
+                    </td>
+                    <td><StatusBadge status={row.has_pending ? 'pending' : 'completed'} /></td>
+                    <td>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <Button size="sm" variant="primary"
+                          disabled={busyPincode === row.pincode}
+                          onClick={() => promoteRequest(row)}>
+                          {busyPincode === row.pincode ? 'Adding...' : 'Start delivering'}
+                        </Button>
+                        {row.has_pending && (
+                          <Button size="sm" disabled={busyPincode === row.pincode}
+                            onClick={() => ignoreRequest(row)}>Ignore</Button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                  {contacts[row.pincode] && (
+                    <tr>
+                      <td colSpan={7} style={{ background: 'var(--bg-2)', padding: '10px 16px' }}>
+                        {contacts[row.pincode].length === 0 ? (
+                          <span style={{ fontSize: 12, color: 'var(--text-4)' }}>No numbers left.</span>
+                        ) : (
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                            {contacts[row.pincode].map((c, i) => (
+                              <span key={`${c.phone_number}-${i}`}
+                                style={{ fontFamily: "'DM Mono',monospace", fontSize: 12.5,
+                                         background: 'var(--bg-1)', border: '1px solid var(--border)',
+                                         borderRadius: 6, padding: '3px 8px' }}>
+                                {c.phone_number}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <LoadMore
+          shown={requests.length}
+          total={requestsTotal}
+          onLoadMore={loadMoreRequests}
+          loading={requestsLoadingMore}
+          label="requested areas"
         />
       </div>
     </div>
