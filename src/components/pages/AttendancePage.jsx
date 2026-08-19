@@ -11,16 +11,10 @@ import { Badge } from "../ui/Badge"
 import { LoadingSpinner } from "../ui/LoadingSpinner"
 import { Drawer } from "../ui/Drawer"
 import { StatusBadge } from "../ui/StatusBadge"
-
-function todayStr() {
-  // IST calendar date (YYYY-MM-DD) to match how the rider app stamps
-  // rider_attendance.date — otherwise a browser in another timezone can query
-  // the wrong day near the early-morning check-in window and miss the row.
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date())
-}
+import { istToday } from "../../utils/formatters"
 
 export function AttendancePage() {
-  const [date, setDate] = useState(todayStr())
+  const [date, setDate] = useState(istToday())
   const { attendance, loading, error, refresh } = useAttendance(date)
   const [selectedRider, setSelectedRider] = useState(null)
 

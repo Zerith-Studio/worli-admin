@@ -29,12 +29,11 @@ import { Button } from '../ui/Button';
 import { LoadingSpinner } from '../ui/LoadingSpinner';
 import { LoadMore } from '../ui/LoadMore';
 import { RowsPerLoad } from '../ui/RowsPerLoad';
+import { istDate } from '../../utils/formatters';
 
-/** Tomorrow as an ISO date string — the day this page is about. */
+/** Tomorrow (IST) as an ISO date string — the day this page is about. */
 function tomorrowISO() {
-  const d = new Date();
-  d.setDate(d.getDate() + 1);
-  return d.toISOString().split('T')[0];
+  return istDate(1);
 }
 
 /** Tomorrow's scheduled-order count, for one hub or for the unassigned bucket. */

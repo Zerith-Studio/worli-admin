@@ -6,6 +6,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { withTimeout } from '../lib/query';
 import { useDataRefresh } from './useDataRefresh';
+import { istToday, istDate } from '../utils/formatters';
 
 const initialStats = {
   totalCustomers: 0,
@@ -33,12 +34,8 @@ export function useDashboardStats() {
     if (!isBackground) setLoading(true);
     setError(null);
     try {
-      const today = new Date().toISOString().split('T')[0];
-      const weekDates = Array.from({ length: 7 }, (_, i) => {
-        const d = new Date();
-        d.setDate(d.getDate() - (6 - i));
-        return d.toISOString().split('T')[0];
-      });
+      const today = istToday();
+      const weekDates = Array.from({ length: 7 }, (_, i) => istDate(i - 6));
 
       const [
         { count: totalCustomers },

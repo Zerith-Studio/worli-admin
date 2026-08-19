@@ -10,6 +10,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
+import { istToday } from '../utils/formatters';
 import { usePaginatedQuery } from './usePaginatedQuery';
 
 export function useRoutes() {
@@ -50,7 +51,7 @@ export function useRoutes() {
 
       // Rider assignments for THIS page's routes: permanent (assigned_date IS
       // NULL) + today's overrides.
-      const today = new Date().toISOString().split('T')[0];
+      const today = istToday();
       const routeIds = routesData.map(r => r.id);
       const { data: riderRoutesData } = await supabase
         .from('rider_routes')
