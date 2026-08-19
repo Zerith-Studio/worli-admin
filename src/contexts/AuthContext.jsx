@@ -8,15 +8,17 @@
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import { deriveAuthLoading } from '../lib/auth-state';
 
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
-  // null  = still loading
-  // false = loaded, not authenticated
-  // object = loaded, authenticated session
+  // undefined = still loading
+  // null      = loaded, not authenticated
+  // object    = loaded, authenticated session
   const [session, setSession] = useState(undefined);
-  const [isAdmin, setIsAdmin] = useState(false);
+  // null = admin check not yet resolved for the current session
+  const [isAdmin, setIsAdmin] = useState(null);
 
   useEffect(() => {
     // 1. Get the current session synchronously from localStorage.
@@ -90,8 +92,7 @@ export function AuthProvider({ children }) {
     await supabase.auth.signOut();
   }
 
-  // session === undefined means we're still loading (getSession not yet resolved)
-  const loading = session === undefined;
+  const loading = deriveAuthLoading(session, isAdmin);
 
   return (
     <AuthContext.Provider value={{
