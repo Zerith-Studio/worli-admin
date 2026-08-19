@@ -13,37 +13,57 @@ const unwrap = (label) => (res) => {
   return res;
 };
 
+// PostgREST silently truncates responses at its max-rows ceiling (default
+// 1000), so any full fetch must page until a short page proves completeness.
+const PAGE = 1000;
+async function fetchAllPages(makeQuery, label) {
+  const rows = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data } = unwrap(label)(await makeQuery().range(from, from + PAGE - 1));
+    const page = data || [];
+    rows.push(...page);
+    if (page.length < PAGE) return rows;
+  }
+}
+
+const headCount = (label) => (res) => unwrap(label)(res).count || 0;
+
 export async function fetchDashboardStats(client) {
   const today = istToday();
   const weekDates = Array.from({ length: 7 }, (_, i) => istDate(i - 6));
 
   const [
-    { count: totalCustomers },
-    { count: activeSubscriptions },
-    { data: todayOrdersData },
-    { data: walletData },
-    { count: pausedCustomers },
-    { data: zoneOrdersData },
-    { data: weekOrders },
+    totalCustomers,
+    activeSubscriptions,
+    pausedCustomers,
+    lowBalanceCount,
+    atRiskCustomers,
+    todayOrders,
+    weekData,
   ] = await withTimeout(Promise.all([
     client.from('users').select('*', { count: 'exact', head: true })
-      .then(unwrap('users count')),
+      .then(headCount('users count')),
     client.from('subscriptions').select('*', { count: 'exact', head: true }).eq('status', 'active')
-      .then(unwrap('active subscriptions count')),
-    client.from('orders').select('status, amount').eq('delivery_date', today)
-      .then(unwrap("today's orders")),
-    client.from('wallets').select('balance')
-      .then(unwrap('wallet balances')),
+      .then(headCount('active subscriptions count')),
     client.from('subscriptions').select('user_id', { count: 'exact', head: true }).eq('status', 'paused')
-      .then(unwrap('paused subscriptions count')),
-    client.from('orders').select('status, addresses!inner(city)').eq('delivery_date', today)
-      .then(unwrap('zone orders')),
-    client.from('orders').select('delivery_date').eq('status', 'delivered')
-      .gte('delivery_date', weekDates[0]).lte('delivery_date', weekDates[6])
-      .then(unwrap('week orders')),
+      .then(headCount('paused subscriptions count')),
+    client.from('wallets').select('*', { count: 'exact', head: true })
+      .lt('balance', 0)
+      .then(headCount('negative-balance count')),
+    client.from('wallets').select('*', { count: 'exact', head: true })
+      .gte('balance', 0).lt('balance', 200)
+      .then(headCount('at-risk count')),
+    fetchAllPages(
+      () => client.from('orders').select('status, amount, addresses(city)').eq('delivery_date', today),
+      "today's orders",
+    ),
+    Promise.all(weekDates.map(d =>
+      client.from('orders').select('*', { count: 'exact', head: true })
+        .eq('status', 'delivered').eq('delivery_date', d)
+        .then(headCount(`deliveries on ${d}`)),
+    )),
   ]));
 
-  const todayOrders = todayOrdersData || [];
   const todayDelivered = todayOrders.filter(o => o.status === 'delivered').length;
   const todayFailed = todayOrders.filter(o => o.status === 'failed').length;
   const todayPending = todayOrders.filter(o => ['pending', 'in_transit', 'scheduled'].includes(o.status)).length;
@@ -51,11 +71,8 @@ export async function fetchDashboardStats(client) {
   const todayOrderValue = todayOrders.reduce((s, o) => s + (o.amount || 0), 0);
   const deliveryPct = todayOrders.length ? Math.round((todayDelivered / todayOrders.length) * 100) : 0;
 
-  const lowBalanceCount = (walletData || []).filter(w => (w.balance || 0) < 0).length;
-  const atRiskCustomers = (walletData || []).filter(w => (w.balance || 0) >= 0 && (w.balance || 0) < 200).length;
-
   const zoneMap = {};
-  (zoneOrdersData || []).forEach(order => {
+  todayOrders.forEach(order => {
     const zone = order.addresses?.city || 'Unknown';
     if (!zoneMap[zone]) zoneMap[zone] = { total: 0, done: 0 };
     zoneMap[zone].total += 1;
@@ -63,17 +80,12 @@ export async function fetchDashboardStats(client) {
   });
   const zoneStats = Object.entries(zoneMap).map(([zone, s]) => ({ zone, total: s.total, done: s.done }));
 
-  const weekMap = {};
-  weekDates.forEach(d => (weekMap[d] = 0));
-  (weekOrders || []).forEach(o => { if (weekMap[o.delivery_date] !== undefined) weekMap[o.delivery_date] += 1; });
-  const weekData = weekDates.map(d => weekMap[d]);
-
   return {
-    totalCustomers: totalCustomers || 0,
-    activeSubscriptions: activeSubscriptions || 0,
+    totalCustomers,
+    activeSubscriptions,
     todayOrders: todayOrders.length,
     todayDelivered, todayFailed, todayPending, todayRevenue, todayOrderValue,
-    atRiskCustomers, pausedCustomers: pausedCustomers || 0,
+    atRiskCustomers, pausedCustomers,
     lowBalanceCount, deliveryPct, zoneStats, weekData,
   };
 }
