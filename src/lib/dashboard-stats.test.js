@@ -67,7 +67,7 @@ function happyPath(q) {
 
 describe("fetchDashboardStats", () => {
   it("aggregates the happy path from bounded queries", async () => {
-    const stats = await fetchDashboardStats(makeClient(happyPath));
+    const stats = await fetchDashboardStats(makeClient(happyPath), 200);
     expect(stats.totalCustomers).toBe(42);
     expect(stats.activeSubscriptions).toBe(7);
     expect(stats.pausedCustomers).toBe(3);
@@ -98,10 +98,24 @@ describe("fetchDashboardStats", () => {
       }
       return happyPath(q);
     });
-    const stats = await fetchDashboardStats(client);
+    const stats = await fetchDashboardStats(client, 200);
     expect(stats.todayOrders).toBe(1500);
     expect(stats.todayDelivered).toBe(1000);
     expect(stats.todayOrderValue).toBe(1500);
+  });
+
+  it("counts at-risk wallets against the configured threshold", async () => {
+    const seen = [];
+    const client = makeClient((q) => {
+      if (q.table === "wallets" && has(q, "gte", "balance")) {
+        seen.push(val(q, "lt", "balance"));
+        return { count: 4, error: null };
+      }
+      return happyPath(q);
+    });
+    const stats = await fetchDashboardStats(client, 150);
+    expect(seen).toEqual([150]);
+    expect(stats.atRiskCustomers).toBe(4);
   });
 
   it("throws when a query fails instead of rendering confident zeros", async () => {
@@ -111,7 +125,7 @@ describe("fetchDashboardStats", () => {
       }
       return happyPath(q);
     });
-    await expect(fetchDashboardStats(client)).rejects.toThrow(
+    await expect(fetchDashboardStats(client, 200)).rejects.toThrow(
       /permission denied for table wallets/
     );
   });
@@ -123,7 +137,7 @@ describe("fetchDashboardStats", () => {
       }
       return happyPath(q);
     });
-    await expect(fetchDashboardStats(client)).rejects.toThrow(/JWT expired/);
+    await expect(fetchDashboardStats(client, 200)).rejects.toThrow(/JWT expired/);
   });
 
   it("throws when a page of today's orders fails", async () => {
@@ -133,6 +147,6 @@ describe("fetchDashboardStats", () => {
       }
       return happyPath(q);
     });
-    await expect(fetchDashboardStats(client)).rejects.toThrow(/timeout/);
+    await expect(fetchDashboardStats(client, 200)).rejects.toThrow(/timeout/);
   });
 });

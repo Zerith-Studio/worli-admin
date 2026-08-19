@@ -28,7 +28,7 @@ async function fetchAllPages(makeQuery, label) {
 
 const headCount = (label) => (res) => unwrap(label)(res).count || 0;
 
-export async function fetchDashboardStats(client) {
+export async function fetchDashboardStats(client, minWalletBalance) {
   const today = istToday();
   const weekDates = Array.from({ length: 7 }, (_, i) => istDate(i - 6));
 
@@ -51,7 +51,7 @@ export async function fetchDashboardStats(client) {
       .lt('balance', 0)
       .then(headCount('negative-balance count')),
     client.from('wallets').select('*', { count: 'exact', head: true })
-      .gte('balance', 0).lt('balance', 200)
+      .gte('balance', 0).lt('balance', minWalletBalance)
       .then(headCount('at-risk count')),
     fetchAllPages(
       () => client.from('orders').select('status, amount, addresses(city)').eq('delivery_date', today),

@@ -27,6 +27,7 @@ export function DashboardPage({ onNav }) {
     deliveryPct,
     zoneStats,
     weekData,
+    minWalletBalance,
     loading,
     error,
     refresh,
@@ -144,7 +145,7 @@ export function DashboardPage({ onNav }) {
                 <div className="alert-icon">⚡</div>
                 <div className="alert-text">
                   <strong>{atRiskCustomers} customers at risk</strong>
-                  Wallet balance below ₹200 threshold
+                  Wallet balance below ₹{minWalletBalance} threshold
                 </div>
               </div>
             )}
