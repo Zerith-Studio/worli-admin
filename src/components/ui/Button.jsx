@@ -8,6 +8,10 @@ const VARIANTS = {
   default: '',
   primary: 'btn-primary',
   danger: 'btn-danger',
+  // Aliases in wide use across call sites; base .btn is the neutral
+  // bordered style they intend.
+  secondary: '',
+  outline: '',
 };
 
 const SIZES = {
@@ -15,22 +19,24 @@ const SIZES = {
   sm: 'btn-sm',
 };
 
-export function Button({ 
-  children, 
-  variant = 'default', 
-  size = 'default', 
-  disabled = false,
-  onClick,
+export function Button({
+  children,
+  variant = 'default',
+  size = 'default',
   type = 'button',
-  className = ''
+  className = '',
+  ...rest
 }) {
+  let variantClass = VARIANTS[variant];
+  if (variantClass === undefined) {
+    if (import.meta.env.DEV) console.warn(`[Button] unknown variant "${variant}"`);
+    variantClass = '';
+  }
+  const classes = ['btn', variantClass, SIZES[size] || '', className]
+    .filter(Boolean)
+    .join(' ');
   return (
-    <button
-      type={type}
-      className={`btn ${VARIANTS[variant]} ${SIZES[size]} ${className}`}
-      disabled={disabled}
-      onClick={onClick}
-    >
+    <button type={type} className={classes} {...rest}>
       {children}
     </button>
   );
