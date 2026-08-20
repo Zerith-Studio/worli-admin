@@ -9,6 +9,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { deriveAuthLoading } from '../lib/auth-state';
+import { planAuthTransition, checkAdminWithRetry } from '../lib/admin-check';
 
 const AuthContext = createContext(null);
 
@@ -33,14 +34,11 @@ export function AuthProvider({ children }) {
       (event, s) => {
         console.log('[Auth] event:', event);
         setSession(s ?? null);
-        if (s?.user) {
-          // Only re-check admin on actual sign-in, not silent token refresh.
-          if (event === 'SIGNED_IN' || event === 'USER_UPDATED') {
-            checkAdmin(s.user.id);
-          }
-        } else {
-          setIsAdmin(false);
-        }
+        // Reset isAdmin to null before a re-check so the loading guard covers
+        // the in-flight check; a silent token refresh leaves it untouched.
+        const { setAdmin, recheck } = planAuthTransition(event, !!s?.user);
+        if (setAdmin !== 'keep') setIsAdmin(setAdmin);
+        if (recheck) checkAdmin(s.user.id);
       }
     );
 
@@ -48,16 +46,15 @@ export function AuthProvider({ children }) {
   }, []);
 
   async function checkAdmin(userId) {
-    try {
-      const { data } = await supabase
-        .from('admins')
-        .select('id')
-        .eq('id', userId)
-        .maybeSingle();
-      setIsAdmin(!!data);
-    } catch {
-      setIsAdmin(false);
+    // Fail closed only after retries: a transient lookup failure must not lock
+    // a real admin out of the console.
+    const outcome = await checkAdminWithRetry(() =>
+      supabase.from('admins').select('id').eq('id', userId).maybeSingle()
+    );
+    if (outcome === 'error') {
+      console.error('[Auth] admin check failed after retries; denying');
     }
+    setIsAdmin(outcome === 'admin');
   }
 
   async function sendOTP(phone) {
