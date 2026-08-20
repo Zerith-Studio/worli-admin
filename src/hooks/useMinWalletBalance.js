@@ -5,6 +5,7 @@
 import { useState, useEffect } from "react"
 import { supabase } from "../lib/supabase"
 import { withTimeout } from "../lib/query"
+import { parseThreshold } from "../lib/wallet-threshold"
 
 /** Fallback if app_settings hasn't been seeded. Matches the previous inline default. */
 const DEFAULT_THRESHOLD = 100
@@ -34,7 +35,7 @@ export function useMinWalletBalance() {
             .eq("setting_key", "min_wallet_balance")
             .maybeSingle()
         )
-        if (!cancelled) setThreshold(parseFloat(data?.setting_value || DEFAULT_THRESHOLD))
+        if (!cancelled) setThreshold(parseThreshold(data?.setting_value, DEFAULT_THRESHOLD))
       } catch {
         // Fail open on the default rather than leaving the list unloadable.
         if (!cancelled) setThreshold(DEFAULT_THRESHOLD)
