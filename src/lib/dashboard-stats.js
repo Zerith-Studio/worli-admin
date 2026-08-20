@@ -14,15 +14,21 @@ const unwrap = (label) => (res) => {
 };
 
 // PostgREST silently truncates responses at its max-rows ceiling (default
-// 1000), so any full fetch must page until a short page proves completeness.
+// 1000), so any full fetch must page. Ordering is required: without a stable
+// sort, .range() windows are not guaranteed disjoint across requests, so
+// concurrent writes can make rows repeat or vanish between pages. Advancing by
+// the actual page length (not the requested window) and stopping only on an
+// empty page keeps it correct even when the server's max-rows is below PAGE.
 const PAGE = 1000;
-async function fetchAllPages(makeQuery, label) {
+async function fetchAllPages(makeQuery, label, orderBy = 'id') {
   const rows = [];
-  for (let from = 0; ; from += PAGE) {
-    const { data } = unwrap(label)(await makeQuery().range(from, from + PAGE - 1));
+  let from = 0;
+  for (;;) {
+    const { data } = unwrap(label)(await makeQuery().order(orderBy).range(from, from + PAGE - 1));
     const page = data || [];
     rows.push(...page);
-    if (page.length < PAGE) return rows;
+    if (page.length === 0) return rows;
+    from += page.length;
   }
 }
 

@@ -60,7 +60,10 @@ function happyPath(q) {
       // Per-day delivered counts for the week chart.
       return { count: val(q, "eq", "delivery_date") === istToday() ? 2 : 0, error: null };
     }
-    return { data: TODAY_ROWS, error: null };
+    // A real server returns the rows on the first page and an empty page past
+    // the end; the pager stops on the empty page.
+    const from = q.filters.find(([o]) => o === "range")?.[1];
+    return { data: from === 0 ? TODAY_ROWS : [], error: null };
   }
   throw new Error(`unexpected table ${q.table}`);
 }
@@ -86,14 +89,17 @@ describe("fetchDashboardStats", () => {
   });
 
   it("pages through today's orders past the PostgREST row ceiling", async () => {
+    // A finite 1500-row set served in 1000 + 500. Ordering makes paging stable.
     const client = makeClient((q) => {
       if (q.table === "orders" && !q.opts?.head) {
         const from = q.filters.find(([o]) => o === "range")?.[1];
         expect(from).toBeDefined();
-        const rows =
-          from === 0
-            ? Array.from({ length: 1000 }, () => ({ status: "delivered", amount: 1, addresses: null }))
-            : Array.from({ length: 500 }, () => ({ status: "pending", amount: 1, addresses: null }));
+        const remaining = Math.max(0, 1500 - from);
+        const rows = Array.from({ length: Math.min(1000, remaining) }, () => ({
+          status: from === 0 ? "delivered" : "pending",
+          amount: 1,
+          addresses: null,
+        }));
         return { data: rows, error: null };
       }
       return happyPath(q);
@@ -102,6 +108,41 @@ describe("fetchDashboardStats", () => {
     expect(stats.todayOrders).toBe(1500);
     expect(stats.todayDelivered).toBe(1000);
     expect(stats.todayOrderValue).toBe(1500);
+  });
+
+  it("orders the paged fetch so pages cannot overlap or skip rows", async () => {
+    let ordered = false;
+    const client = makeClient((q) => {
+      if (q.table === "orders" && !q.opts?.head) {
+        if (has(q, "order", "id")) ordered = true;
+        return { data: [], error: null };
+      }
+      return happyPath(q);
+    });
+    await fetchDashboardStats(client, 200);
+    expect(ordered).toBe(true);
+  });
+
+  it("keeps paging when the server page size is below the requested window", async () => {
+    // A server whose max-rows is 400 returns short-but-full pages; the loop must
+    // not mistake the first 400-row page for the last one and truncate.
+    const CAP = 400;
+    const TOTAL = 1000;
+    const client = makeClient((q) => {
+      if (q.table === "orders" && !q.opts?.head) {
+        const from = q.filters.find(([o]) => o === "range")?.[1];
+        const remaining = Math.max(0, TOTAL - from);
+        const rows = Array.from({ length: Math.min(CAP, remaining) }, () => ({
+          status: "delivered",
+          amount: 1,
+          addresses: null,
+        }));
+        return { data: rows, error: null };
+      }
+      return happyPath(q);
+    });
+    const stats = await fetchDashboardStats(client, 200);
+    expect(stats.todayOrders).toBe(TOTAL);
   });
 
   it("counts at-risk wallets against the configured threshold", async () => {
