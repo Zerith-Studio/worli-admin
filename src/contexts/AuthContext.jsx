@@ -9,6 +9,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { deriveAuthLoading } from '../lib/auth-state';
+import { withTimeout } from '../lib/query';
 import { planAuthTransition, checkAdminWithRetry } from '../lib/admin-check';
 
 const AuthContext = createContext(null);
@@ -47,9 +48,11 @@ export function AuthProvider({ children }) {
 
   async function checkAdmin(userId) {
     // Fail closed only after retries: a transient lookup failure must not lock
-    // a real admin out of the console.
+    // a real admin out of the console. withTimeout is what guarantees this
+    // settles at all — isAdmin gates the loading state, so a stalled query
+    // would otherwise hold the app on the loading screen with no way out.
     const outcome = await checkAdminWithRetry(() =>
-      supabase.from('admins').select('id').eq('id', userId).maybeSingle()
+      withTimeout(supabase.from('admins').select('id').eq('id', userId).maybeSingle())
     );
     if (outcome === 'error') {
       console.error('[Auth] admin check failed after retries; denying');
@@ -70,15 +73,21 @@ export function AuthProvider({ children }) {
     if (error) return { success: false, error: error.message };
     if (!data.user) return { success: false, error: 'Login failed' };
 
-    const { data: adminRow } = await supabase
-      .from('admins')
-      .select('id')
-      .eq('id', data.user.id)
-      .maybeSingle();
+    // Same lookup as checkAdmin, and it needs the same treatment: a failed
+    // query resolves as data: null, which read as a denial and signed a real
+    // admin out on a blip.
+    const outcome = await checkAdminWithRetry(() =>
+      withTimeout(supabase.from('admins').select('id').eq('id', data.user.id).maybeSingle())
+    );
 
-    if (!adminRow) {
+    if (outcome !== 'admin') {
       await supabase.auth.signOut();
-      return { success: false, error: 'Access denied. You are not an admin.' };
+      return {
+        success: false,
+        error: outcome === 'error'
+          ? 'Could not verify your account. Please try again.'
+          : 'Access denied. You are not an admin.',
+      };
     }
 
     setIsAdmin(true);

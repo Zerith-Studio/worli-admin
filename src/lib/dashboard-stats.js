@@ -20,16 +20,21 @@ const unwrap = (label) => (res) => {
 // the actual page length (not the requested window) and stopping only on an
 // empty page keeps it correct even when the server's max-rows is below PAGE.
 const PAGE = 1000;
+// A day's orders, with room to spare. Termination otherwise rests entirely on
+// the server honouring .range(): one that ignores it returns the same page
+// forever and this accumulates until the tab dies.
+const MAX_ROWS = 100000;
 async function fetchAllPages(makeQuery, label, orderBy = 'id') {
   const rows = [];
   let from = 0;
-  for (;;) {
+  while (rows.length < MAX_ROWS) {
     const { data } = unwrap(label)(await makeQuery().order(orderBy).range(from, from + PAGE - 1));
     const page = data || [];
     rows.push(...page);
     if (page.length === 0) return rows;
     from += page.length;
   }
+  throw new Error(`${label}: exceeded ${MAX_ROWS} rows; refusing to page further`);
 }
 
 const headCount = (label) => (res) => unwrap(label)(res).count || 0;
@@ -57,7 +62,9 @@ export async function fetchDashboardStats(client, minWalletBalance) {
       .lt('balance', 0)
       .then(headCount('negative-balance count')),
     client.from('wallets').select('*', { count: 'exact', head: true })
-      .gte('balance', 0).lt('balance', minWalletBalance)
+      // balance is nullable; a plain range drops those rows, and a wallet with
+      // no balance is precisely an at-risk customer.
+      .or(`balance.is.null,and(balance.gte.0,balance.lt.${minWalletBalance})`)
       .then(headCount('at-risk count')),
     fetchAllPages(
       () => client.from('orders').select('status, amount, addresses(city)').eq('delivery_date', today),

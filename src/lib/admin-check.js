@@ -30,7 +30,15 @@ const defaultSleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // a blip.
 export async function checkAdminWithRetry(queryFn, { retries = 2, delayMs = 300, sleep = defaultSleep } = {}) {
   for (let attempt = 0; ; attempt += 1) {
-    const outcome = interpretAdminResult(await queryFn());
+    // A rejected query (a timeout, or supabase-js throwing rather than
+    // resolving) must land here as 'error'. Letting it propagate leaves the
+    // caller's isAdmin unset, which reads as "check still in flight" forever.
+    let outcome;
+    try {
+      outcome = interpretAdminResult(await queryFn());
+    } catch {
+      outcome = 'error';
+    }
     if (outcome !== 'error' || attempt >= retries) return outcome;
     await sleep(delayMs);
   }

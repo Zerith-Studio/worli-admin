@@ -141,25 +141,18 @@ export function useWalletStats() {
   const addCredit = useCallback(
     async (userId, amount, reason = "Manual credit") => {
       try {
-        const { data: wallet, error: walletError } = await supabase
-          .from("wallets")
-          .select("*")
-          .eq("user_id", userId)
-          .maybeSingle()
-        if (walletError) throw walletError
-
-        const balanceBefore = wallet?.balance ?? 0
-        const newBalance = balanceBefore + amount
-
+        // A signed delta applied under the wallet's row lock. Reading the
+        // balance here and writing back the absolute sum destroyed any charge
+        // or credit that landed in between (P-F30 / AD-3.6).
         const { data, error } = await supabase.functions.invoke("admin-db-action", {
           body: {
             action: "rpc",
-            fn: "rpc_admin_adjust_wallet",
+            fn: "rpc_admin_credit_wallet",
             params: {
               p_user_id: userId,
-              p_new_balance: newBalance,
-              p_create_txn: true,
+              p_amount: amount,
               p_note: reason,
+              p_create_txn: true,
             },
           },
         })

@@ -67,3 +67,29 @@ describe("checkAdminWithRetry", () => {
     expect(calls).toBe(3);
   });
 });
+
+describe("checkAdminWithRetry — failures that never resolve cleanly", () => {
+  it("treats a thrown query as an error rather than propagating it", async () => {
+    const sleep = () => Promise.resolve();
+    const outcome = await checkAdminWithRetry(
+      () => Promise.reject(new Error("Query timed out")),
+      { retries: 1, sleep }
+    );
+    expect(outcome).toBe("error");
+  });
+
+  it("still resolves admin when a throw is followed by a good response", async () => {
+    const sleep = () => Promise.resolve();
+    let call = 0;
+    const outcome = await checkAdminWithRetry(
+      () => {
+        call += 1;
+        return call === 1
+          ? Promise.reject(new Error("network"))
+          : Promise.resolve({ data: { id: "a" }, error: null });
+      },
+      { retries: 2, sleep }
+    );
+    expect(outcome).toBe("admin");
+  });
+});

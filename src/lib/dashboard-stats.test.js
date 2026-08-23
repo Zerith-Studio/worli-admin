@@ -23,6 +23,7 @@ function makeClient(respond) {
         gte: record("gte"),
         lte: record("lte"),
         in: record("in"),
+        or: record("or"),
         range: record("range"),
         order: record("order"),
         then(onFulfilled, onRejected) {
@@ -35,6 +36,7 @@ function makeClient(respond) {
 }
 
 const has = (q, op, col) => q.filters.some(([o, c]) => o === op && c === col);
+const orFilter = (q) => q.filters.find(([o]) => o === "or")?.[1];
 const val = (q, op, col) => q.filters.find(([o, c]) => o === op && c === col)?.[2];
 
 const TODAY_ROWS = [
@@ -52,7 +54,7 @@ function happyPath(q) {
   if (q.table === "wallets") {
     // Bounded server-side counts, never a full row fetch.
     if (!q.opts?.head) throw new Error("wallets must be counted, not fetched");
-    if (has(q, "gte", "balance")) return { count: 5, error: null };
+    if (orFilter(q)) return { count: 5, error: null };
     return { count: 1, error: null };
   }
   if (q.table === "orders") {
@@ -148,15 +150,31 @@ describe("fetchDashboardStats", () => {
   it("counts at-risk wallets against the configured threshold", async () => {
     const seen = [];
     const client = makeClient((q) => {
-      if (q.table === "wallets" && has(q, "gte", "balance")) {
-        seen.push(val(q, "lt", "balance"));
+      if (q.table === "wallets" && orFilter(q)) {
+        seen.push(orFilter(q));
         return { count: 4, error: null };
       }
       return happyPath(q);
     });
     const stats = await fetchDashboardStats(client, 150);
-    expect(seen).toEqual([150]);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toContain("balance.lt.150");
     expect(stats.atRiskCustomers).toBe(4);
+  });
+
+  it("counts a wallet with no balance row value as at risk", async () => {
+    // balance is nullable, and a NULL is exactly the customer ops needs to
+    // chase; a plain gte/lt range drops it silently.
+    let captured;
+    const spy = makeClient((q) => {
+      if (q.table === "wallets" && orFilter(q)) {
+        captured = orFilter(q);
+        return { count: 4, error: null };
+      }
+      return happyPath(q);
+    });
+    await fetchDashboardStats(spy, 150);
+    expect(captured).toContain("balance.is.null");
   });
 
   it("throws when a query fails instead of rendering confident zeros", async () => {
