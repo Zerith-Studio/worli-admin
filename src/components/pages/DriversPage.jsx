@@ -6,6 +6,7 @@
 
 import React, { useState } from 'react';
 import { useDrivers } from '../../hooks/useDrivers';
+import { buildRouteOwners, resolveRouteHolder } from '../../lib/route-owners';
 import { useDataRefresh } from '../../hooks/useDataRefresh';
 import { Button } from '../ui/Button';
 import { StatusBadge } from '../ui/StatusBadge';
@@ -33,6 +34,7 @@ export function DriversPage() {
   const [assignRouteId, setAssignRouteId] = useState('');
   // 'permanent' = standing assignment; 'override' = just today.
   const [assignMode, setAssignMode] = useState('permanent');
+  const [assignMsg, setAssignMsg] = useState(null);
 
   useDataRefresh(refresh, 60000, true);
 
@@ -74,9 +76,37 @@ export function DriversPage() {
     setSelectedDriver(prev => ({ ...prev, isVerified: newVal }));
   };
 
+  // Who currently holds each route, so the picker can say so instead of letting
+  // ops take a route off a colleague without knowing it happened.
+  const routeOwners = buildRouteOwners(drivers);
+
+  const routeOwnerLabel = (routeId) => {
+    const holder = resolveRouteHolder(routeOwners, routeId, assignMode);
+    if (!holder || holder.id === selectedDriver?.id) return '';
+    return ` — currently ${holder.name}`;
+  };
+
   const handleAssignRoute = async () => {
     if (!assignRouteId) return;
+    setAssignMsg(null);
     const permanent = assignMode === 'permanent';
+
+    // set_permanent_route / set_route_override both upsert on the route, so
+    // assigning a route that someone else holds silently takes it from them —
+    // and their drawer is a different panel nobody is looking at. Name the
+    // driver being displaced before doing it.
+    const currentOwner = resolveRouteHolder(routeOwners, assignRouteId, assignMode);
+    if (currentOwner && currentOwner.id !== selectedDriver.id) {
+      const route = routes.find(r => r.id === assignRouteId);
+      const scope = currentOwner.tenure === 'permanent'
+        ? 'permanently assigned'
+        : 'assigned for today';
+      if (!window.confirm(
+        `${route?.name || 'This route'} is currently ${scope} to ${currentOwner.name}.\n\n` +
+        `Assigning it to ${selectedDriver.name} will remove it from ${currentOwner.name}. Continue?`
+      )) return;
+    }
+
     const result = await assignRoute(selectedDriver.id, assignRouteId, { permanent });
     if (result.success) {
       const route = routes.find(r => r.id === assignRouteId);
@@ -375,7 +405,7 @@ export function DriversPage() {
                     <select className="form-select" value={assignRouteId}
                       onChange={e => setAssignRouteId(e.target.value)}>
                       <option value="">— Pick a route —</option>
-                      {filteredRoutes.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                      {filteredRoutes.map(r => <option key={r.id} value={r.id}>{r.name}{routeOwnerLabel(r.id)}</option>)}
                     </select>
                   )}
                 </div>
@@ -385,6 +415,12 @@ export function DriversPage() {
                 <Button variant="primary" onClick={handleAssignRoute} style={{ width: '100%', marginTop: 4 }}>
                   {assignMode === 'permanent' ? 'Assign Permanent Route' : "Assign for Today"}
                 </Button>
+              )}
+
+              {assignMsg && (
+                <div style={{ marginTop: 8, fontSize: 12, color: assignMsg.ok ? 'var(--green)' : 'var(--red)' }}>
+                  {assignMsg.text}
+                </div>
               )}
             </div>
             );

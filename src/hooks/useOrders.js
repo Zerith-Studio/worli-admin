@@ -5,6 +5,7 @@
 import { useCallback } from "react"
 import { supabase } from "../lib/supabase"
 import { throwFunctionError } from "../lib/function-errors"
+import { withTimeout } from "../lib/query"
 import { usePaginatedQuery } from "./usePaginatedQuery"
 import { orLiteral, resolveUserIdsMatching } from "../lib/postgrest"
 import { istToday, istDate } from "../utils/formatters"
@@ -67,6 +68,7 @@ export function useOrders() {
           cancellationReason: order.cancellation_reason,
           riderId: order.rider_id,
           routeId: order.route_id,
+          assignedManually: order.assigned_manually || false,
           routeStopId: order.route_stop_id,
           stopName: order.route_stops?.name || "—",
           deliveredAt: order.delivered_at,
@@ -186,23 +188,94 @@ export function useOrders() {
     [fetchOrders],
   )
 
-  const reassignDriver = useCallback(
+  // Assign ONE order. Marks it a manual exception, so route-level operations
+  // will not overwrite it. This is what the "Reassign Order" button always
+  // claimed to do — it used to call the route-override path and move the
+  // order's entire route for the day.
+  const assignSingleOrder = useCallback(
     async (id, riderId) => {
       try {
-        const { data, error } = await supabase.rpc("admin_assign_order_to_rider", {
+        const { data, error } = await supabase.rpc("admin_assign_single_order", {
           p_order_id: id,
           p_rider_id: riderId,
         })
         if (error) await throwFunctionError(error, data)
         if (data?.error) await throwFunctionError(null, data)
         await fetchOrders()
-        return { success: true, mode: data?.mode, warning: data?.warning }
+        return { success: true }
       } catch (err) {
         return { success: false, error: err.message }
       }
     },
     [fetchOrders],
   )
+
+  // Drop a per-order assignment and hand the stop back to its route's rider.
+  const clearOrderAssignment = useCallback(
+    async (id) => {
+      try {
+        const { data, error } = await supabase.rpc("admin_clear_order_assignment", {
+          p_order_id: id,
+        })
+        if (error) await throwFunctionError(error, data)
+        if (data?.error) await throwFunctionError(null, data)
+        await fetchOrders()
+        // NULL is a real answer here: an unrouted order, or a route with no
+        // rider today, goes back to being unowned.
+        return { success: true, riderId: data?.rider_id ?? null }
+      } catch (err) {
+        return { success: false, error: err.message }
+      }
+    },
+    [fetchOrders],
+  )
+
+  // Move a whole route-day to another rider. Returns how many rows moved and
+  // how many were left alone because they were assigned by hand, so the caller
+  // can tell the user what actually happened.
+  const reassignRouteForDate = useCallback(
+    async (routeId, riderId, date) => {
+      try {
+        const { data, error } = await supabase.rpc("set_route_override", {
+          p_route_id: routeId,
+          p_rider_id: riderId,
+          p_date: date,
+        })
+        if (error) await throwFunctionError(error, data)
+        if (data?.error) await throwFunctionError(null, data)
+        await fetchOrders()
+        return {
+          success: true,
+          ordersUpdated: data?.orders_updated ?? 0,
+          returnsUpdated: data?.returns_updated ?? 0,
+          skippedManual: data?.orders_skipped_manual ?? 0,
+        }
+      } catch (err) {
+        return { success: false, error: err.message }
+      }
+    },
+    [fetchOrders],
+  )
+
+  // How much a route reassignment would move, for the confirmation copy.
+  // Throws rather than reporting 0: a discarded error here rendered "this moves
+  // all 0 stop(s)" and the admin confirmed a whole-route move on the strength
+  // of it. Before the per-order migration is applied the assigned_manually
+  // filter is itself a 400, which is exactly that case.
+  const countRouteOrders = useCallback(async (routeId, date) => {
+    const { count, error } = await withTimeout(
+      supabase
+        .from("orders")
+        .select("id", { count: "exact", head: true })
+        .eq("route_id", routeId)
+        .eq("delivery_date", date)
+        .in("status", ["scheduled", "in_transit"])
+        .eq("assigned_manually", false),
+    )
+    if (error) await throwFunctionError(error, null)
+    if (typeof count !== "number") throw new Error("Route stop count unavailable")
+    return count
+  }, [])
 
   const retryOrder = useCallback(
     async (id, newFailReason) => {
@@ -286,7 +359,10 @@ export function useOrders() {
     updateFilters,
     updateOrderStatus,
     updateOrderNotes,
-    reassignDriver,
+    assignSingleOrder,
+    clearOrderAssignment,
+    reassignRouteForDate,
+    countRouteOrders,
     retryOrder,
     editSingleOrder,
     autoAssignOrders,

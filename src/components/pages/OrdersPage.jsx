@@ -6,8 +6,9 @@
 // - Confirmation dialog before marking delivered
 // ============================================
 
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { useOrders } from '../../hooks/useOrders';
+import { COUNT_FAILED, routeCountMessage, canConfirmRouteReassign } from '../../lib/route-reassign';
 import { useDrivers } from '../../hooks/useDrivers';
 import { useDataRefresh } from '../../hooks/useDataRefresh';
 import { useDebouncedSearch } from '../../hooks/useDebouncedValue';
@@ -39,7 +40,10 @@ export function OrdersPage() {
     filters,
     updateFilters,
     updateOrderStatus,
-    reassignDriver,
+    assignSingleOrder,
+    clearOrderAssignment,
+    reassignRouteForDate,
+    countRouteOrders,
     retryOrder,
     editSingleOrder,
     autoAssignOrders,
@@ -47,7 +51,7 @@ export function OrdersPage() {
   } = useOrders();
 
   const { drivers } = useDrivers();
-  const [selectedOrder, setSelectedOrder] = useState(null);
+  const [pinnedOrder, setSelectedOrder] = useState(null);
   const [failModal, setFailModal] = useState(null);
   const [failReasonEdit, setFailReasonEdit] = useState('');
   const [retrying, setRetrying] = useState(false);
@@ -60,7 +64,21 @@ export function OrdersPage() {
   // typing pause, not per keystroke.
   const [search, setSearch] = useDebouncedSearch(updateFilters);
   const [photoModal, setPhotoModal] = useState(null); // url string or null
-  const [reassignModal, setReassignModal] = useState(null); // order object
+  // Two distinct actions, deliberately not one. `assignModal` moves a single
+  // stop; `routeModal` moves an entire route-day. They used to be the same
+  // button, which called the route path while saying "Reassign Order".
+  const [assignModal, setAssignModal] = useState(null); // order object
+  const [routeModal, setRouteModal] = useState(null);   // order object (for its route)
+  const [routeOrderCount, setRouteOrderCount] = useState(null);
+  const routeCountSeq = useRef(0);
+
+  // Read through to the refreshed list rather than trusting the pinned copy:
+  // every mutation that moves the rider would otherwise have to restate it, and
+  // "Return to route" did not — leaving the drawer naming the previous rider.
+  // Falls back to the pinned copy so the drawer survives a filter change.
+  const selectedOrder = pinnedOrder
+    ? orders.find(o => o.id === pinnedOrder.id) ?? pinnedOrder
+    : null;
   const [selectedDriver, setSelectedDriver] = useState('');
   const [reassigning, setReassigning] = useState(false);
   const [autoAssigning, setAutoAssigning] = useState(false);
@@ -148,17 +166,61 @@ export function OrdersPage() {
     }
   };
 
-  const handleReassignSubmit = async () => {
-    if (!selectedDriver || !reassignModal) return;
+  const handleAssignSingle = async () => {
+    if (!selectedDriver || !assignModal) return;
     setReassigning(true);
-    const result = await reassignDriver(reassignModal.id, selectedDriver);
+    const result = await assignSingleOrder(assignModal.id, selectedDriver);
     setReassigning(false);
     if (result.success) {
-      setReassignModal(null);
-      setSelectedOrder(prev => prev ? { ...prev, riderId: selectedDriver } : null);
-      if (result.warning) alert(result.warning);
+      setAssignModal(null);
+      setSelectedOrder(prev => prev ? { ...prev, riderId: selectedDriver, assignedManually: true } : null);
     } else {
-      alert("Failed to reassign: " + result.error);
+      alert("Failed to assign: " + result.error);
+    }
+  };
+
+  const handleClearAssignment = async (order) => {
+    setReassigning(true);
+    const result = await clearOrderAssignment(order.id);
+    setReassigning(false);
+    if (result.success) {
+      setSelectedOrder(prev =>
+        prev ? { ...prev, assignedManually: false, riderId: result.riderId } : null);
+    } else {
+      alert("Failed to return the order to its route: " + result.error);
+    }
+  };
+
+  const openRouteModal = async (order) => {
+    // Cancelling and reopening within one round trip would otherwise let the
+    // first count land in the second modal — and a late success on top of a
+    // failed count re-enables Confirm on a route whose size is unknown.
+    const seq = ++routeCountSeq.current;
+    setRouteModal(order);
+    setSelectedDriver('');
+    setRouteOrderCount(null);
+    try {
+      const count = await countRouteOrders(order.routeId, order.date);
+      if (seq === routeCountSeq.current) setRouteOrderCount(count);
+    } catch (err) {
+      console.error('[Orders] route stop count failed:', err);
+      if (seq === routeCountSeq.current) setRouteOrderCount(COUNT_FAILED);
+    }
+  };
+
+  const handleReassignRoute = async () => {
+    if (!selectedDriver || !routeModal) return;
+    setReassigning(true);
+    const result = await reassignRouteForDate(routeModal.routeId, selectedDriver, routeModal.date);
+    setReassigning(false);
+    if (result.success) {
+      setRouteModal(null);
+      const skipped = result.skippedManual
+        ? ` ${result.skippedManual} hand-assigned order(s) were left with their riders.`
+        : '';
+      alert(`Moved ${result.ordersUpdated} order(s) and ${result.returnsUpdated} bottle return(s) to the new rider.${skipped}`);
+    } else {
+      alert("Failed to reassign the route: " + result.error);
     }
   };
 
@@ -363,11 +425,37 @@ export function OrdersPage() {
               { label: "Amount", val: selectedOrder.amount === 0 ? '₹0 (Free)' : `₹${selectedOrder.amount}` },
               { label: "Stop", val: selectedOrder.stopName },
               { label: "Assigned Rider", val: (
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {selectedOrder.riderId ? drivers.find(d => d.id === selectedOrder.riderId)?.name || 'Unknown' : 'Auto (via Route)'}
-                    </span>
-                    <Button size="sm" onClick={() => { setReassignModal(selectedOrder); setSelectedDriver(selectedOrder.riderId || ''); }}>Change</Button>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {selectedOrder.riderId ? drivers.find(d => d.id === selectedOrder.riderId)?.name || 'Unknown' : 'Auto (via Route)'}
+                      </span>
+                      <Button size="sm" onClick={() => { setAssignModal(selectedOrder); setSelectedDriver(selectedOrder.riderId || ''); }}>Change</Button>
+                    </div>
+                    {/* An exception to the route needs to be visible, or nobody
+                        can explain a week later why this stop moved. */}
+                    {selectedOrder.assignedManually && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--yellow)', background: 'var(--bg)', padding: '2px 6px', borderRadius: 4 }}>
+                          ASSIGNED MANUALLY
+                        </span>
+                        <button
+                          onClick={() => handleClearAssignment(selectedOrder)}
+                          disabled={reassigning}
+                          style={{ fontSize: 11, color: 'var(--text-3)', background: 'none', border: 'none', textDecoration: 'underline', cursor: 'pointer', padding: 0 }}
+                        >
+                          Return to route
+                        </button>
+                      </div>
+                    )}
+                    {selectedOrder.routeId && (
+                      <button
+                        onClick={() => openRouteModal(selectedOrder)}
+                        style={{ fontSize: 11, color: 'var(--text-3)', background: 'none', border: 'none', textDecoration: 'underline', cursor: 'pointer', padding: 0, textAlign: 'left' }}
+                      >
+                        Reassign the whole route instead…
+                      </button>
+                    )}
                   </div>
               ) },
             ].map(r => (
@@ -639,22 +727,22 @@ export function OrdersPage() {
         </Modal>
       )}
 
-      {/* REASSIGN MODAL */}
-      {reassignModal && (
+      {/* ASSIGN ONE ORDER — moves exactly this stop, nothing else. */}
+      {assignModal && (
         <Modal
-          title={`Reassign Order — ${reassignModal.orderNumber}`}
-          onClose={() => setReassignModal(null)}
+          title={`Assign Order — ${assignModal.orderNumber}`}
+          onClose={() => setAssignModal(null)}
           footer={
             <>
-              <Button onClick={() => setReassignModal(null)}>Cancel</Button>
-              <Button variant="primary" onClick={handleReassignSubmit} disabled={reassigning || !selectedDriver}>
-                {reassigning ? 'Reassigning...' : 'Confirm Assignment'}
+              <Button onClick={() => setAssignModal(null)}>Cancel</Button>
+              <Button variant="primary" onClick={handleAssignSingle} disabled={reassigning || !selectedDriver}>
+                {reassigning ? 'Assigning...' : 'Assign This Order'}
               </Button>
             </>
           }
         >
           <div className="form-group">
-            <label className="form-label">Select Driver for Order</label>
+            <label className="form-label">Select Driver for This Order</label>
             <select
               className="form-select"
               value={selectedDriver}
@@ -667,7 +755,50 @@ export function OrdersPage() {
             </select>
           </div>
           <div style={{ padding: '10px 12px', background: 'var(--bg)', borderRadius: 7, fontSize: 12, color: 'var(--text-3)', marginTop: 4 }}>
-            Reassigning uses the same route override path as auto-assignment for this order's route and date.
+            Only this order moves. Other stops on the route keep their rider, and
+            this order will stay with the driver you pick even if the route is
+            reassigned later.
+          </div>
+        </Modal>
+      )}
+
+      {/* REASSIGN A ROUTE-DAY — the bulk action, stated as such. */}
+      {routeModal && (
+        <Modal
+          title="Reassign Route"
+          onClose={() => setRouteModal(null)}
+          footer={
+            <>
+              <Button onClick={() => setRouteModal(null)}>Cancel</Button>
+              <Button
+                variant="primary"
+                onClick={handleReassignRoute}
+                disabled={!canConfirmRouteReassign({ count: routeOrderCount, selectedDriver, reassigning })}
+              >
+                {reassigning ? 'Reassigning...' : 'Reassign Whole Route'}
+              </Button>
+            </>
+          }
+        >
+          <div style={{ padding: '10px 12px', background: 'var(--bg)', borderRadius: 7, fontSize: 12, color: 'var(--text)', marginBottom: 12 }}>
+            {routeCountMessage(routeOrderCount, routeModal.date, routeModal.orderNumber)}
+          </div>
+          <div className="form-group">
+            <label className="form-label">Select Driver for the Route</label>
+            <select
+              className="form-select"
+              value={selectedDriver}
+              onChange={e => setSelectedDriver(e.target.value)}
+            >
+              <option value="">— Select a Driver —</option>
+              {drivers.filter(d => d.status === 'active').map(d => (
+                <option key={d.id} value={d.id}>{d.name} ({d.phone})</option>
+              ))}
+            </select>
+          </div>
+          <div style={{ padding: '10px 12px', background: 'var(--bg)', borderRadius: 7, fontSize: 12, color: 'var(--text-3)' }}>
+            Orders assigned to a driver by hand are exceptions to the route and
+            will keep their current driver.
           </div>
         </Modal>
       )}
