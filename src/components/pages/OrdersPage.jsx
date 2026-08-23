@@ -8,6 +8,7 @@
 
 import React, { useState } from 'react';
 import { useOrders } from '../../hooks/useOrders';
+import { COUNT_FAILED, routeCountMessage, canConfirmRouteReassign } from '../../lib/route-reassign';
 import { useDrivers } from '../../hooks/useDrivers';
 import { useDataRefresh } from '../../hooks/useDataRefresh';
 import { useDebouncedSearch } from '../../hooks/useDebouncedValue';
@@ -50,7 +51,7 @@ export function OrdersPage() {
   } = useOrders();
 
   const { drivers } = useDrivers();
-  const [selectedOrder, setSelectedOrder] = useState(null);
+  const [pinnedOrder, setSelectedOrder] = useState(null);
   const [failModal, setFailModal] = useState(null);
   const [failReasonEdit, setFailReasonEdit] = useState('');
   const [retrying, setRetrying] = useState(false);
@@ -69,6 +70,14 @@ export function OrdersPage() {
   const [assignModal, setAssignModal] = useState(null); // order object
   const [routeModal, setRouteModal] = useState(null);   // order object (for its route)
   const [routeOrderCount, setRouteOrderCount] = useState(null);
+
+  // Read through to the refreshed list rather than trusting the pinned copy:
+  // every mutation that moves the rider would otherwise have to restate it, and
+  // "Return to route" did not — leaving the drawer naming the previous rider.
+  // Falls back to the pinned copy so the drawer survives a filter change.
+  const selectedOrder = pinnedOrder
+    ? orders.find(o => o.id === pinnedOrder.id) ?? pinnedOrder
+    : null;
   const [selectedDriver, setSelectedDriver] = useState('');
   const [reassigning, setReassigning] = useState(false);
   const [autoAssigning, setAutoAssigning] = useState(false);
@@ -174,7 +183,8 @@ export function OrdersPage() {
     const result = await clearOrderAssignment(order.id);
     setReassigning(false);
     if (result.success) {
-      setSelectedOrder(prev => prev ? { ...prev, assignedManually: false } : null);
+      setSelectedOrder(prev =>
+        prev ? { ...prev, assignedManually: false, riderId: result.riderId } : null);
     } else {
       alert("Failed to return the order to its route: " + result.error);
     }
@@ -184,7 +194,12 @@ export function OrdersPage() {
     setRouteModal(order);
     setSelectedDriver('');
     setRouteOrderCount(null);
-    setRouteOrderCount(await countRouteOrders(order.routeId, order.date));
+    try {
+      setRouteOrderCount(await countRouteOrders(order.routeId, order.date));
+    } catch (err) {
+      console.error('[Orders] route stop count failed:', err);
+      setRouteOrderCount(COUNT_FAILED);
+    }
   };
 
   const handleReassignRoute = async () => {
@@ -749,16 +764,18 @@ export function OrdersPage() {
           footer={
             <>
               <Button onClick={() => setRouteModal(null)}>Cancel</Button>
-              <Button variant="primary" onClick={handleReassignRoute} disabled={reassigning || !selectedDriver}>
+              <Button
+                variant="primary"
+                onClick={handleReassignRoute}
+                disabled={!canConfirmRouteReassign({ count: routeOrderCount, selectedDriver, reassigning })}
+              >
                 {reassigning ? 'Reassigning...' : 'Reassign Whole Route'}
               </Button>
             </>
           }
         >
           <div style={{ padding: '10px 12px', background: 'var(--bg)', borderRadius: 7, fontSize: 12, color: 'var(--text)', marginBottom: 12 }}>
-            {routeOrderCount === null
-              ? 'Counting the stops on this route…'
-              : `This moves all ${routeOrderCount} stop(s) on this route for ${routeModal.date} to the driver you pick, not just order ${routeModal.orderNumber}.`}
+            {routeCountMessage(routeOrderCount, routeModal.date, routeModal.orderNumber)}
           </div>
           <div className="form-group">
             <label className="form-label">Select Driver for the Route</label>

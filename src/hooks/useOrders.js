@@ -218,7 +218,9 @@ export function useOrders() {
         if (error) await throwFunctionError(error, data)
         if (data?.error) await throwFunctionError(null, data)
         await fetchOrders()
-        return { success: true }
+        // NULL is a real answer here: an unrouted order, or a route with no
+        // rider today, goes back to being unowned.
+        return { success: true, riderId: data?.rider_id ?? null }
       } catch (err) {
         return { success: false, error: err.message }
       }
@@ -254,15 +256,21 @@ export function useOrders() {
   )
 
   // How much a route reassignment would move, for the confirmation copy.
+  // Throws rather than reporting 0: a discarded error here rendered "this moves
+  // all 0 stop(s)" and the admin confirmed a whole-route move on the strength
+  // of it. Before the per-order migration is applied the assigned_manually
+  // filter is itself a 400, which is exactly that case.
   const countRouteOrders = useCallback(async (routeId, date) => {
-    const { count } = await supabase
+    const { count, error } = await supabase
       .from("orders")
       .select("id", { count: "exact", head: true })
       .eq("route_id", routeId)
       .eq("delivery_date", date)
       .in("status", ["scheduled", "in_transit"])
       .eq("assigned_manually", false)
-    return count ?? 0
+    if (error) await throwFunctionError(error, null)
+    if (typeof count !== "number") throw new Error("Route stop count unavailable")
+    return count
   }, [])
 
   const retryOrder = useCallback(

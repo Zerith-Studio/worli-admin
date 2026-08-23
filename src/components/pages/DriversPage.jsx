@@ -6,6 +6,7 @@
 
 import React, { useState } from 'react';
 import { useDrivers } from '../../hooks/useDrivers';
+import { buildRouteOwners, resolveRouteHolder } from '../../lib/route-owners';
 import { useDataRefresh } from '../../hooks/useDataRefresh';
 import { Button } from '../ui/Button';
 import { StatusBadge } from '../ui/StatusBadge';
@@ -77,19 +78,10 @@ export function DriversPage() {
 
   // Who currently holds each route, so the picker can say so instead of letting
   // ops take a route off a colleague without knowing it happened.
-  const routeOwners = new Map();
-  for (const d of drivers) {
-    for (const r of d.assignedRoutes || []) {
-      const entry = routeOwners.get(r.routeId) || {};
-      entry[r.isPermanent ? 'permanent' : 'override'] = { id: d.id, name: d.name };
-      routeOwners.set(r.routeId, entry);
-    }
-  }
+  const routeOwners = buildRouteOwners(drivers);
 
   const routeOwnerLabel = (routeId) => {
-    const owner = routeOwners.get(routeId);
-    if (!owner) return '';
-    const holder = assignMode === 'permanent' ? owner.permanent : owner.override || owner.permanent;
+    const holder = resolveRouteHolder(routeOwners, routeId, assignMode);
     if (!holder || holder.id === selectedDriver?.id) return '';
     return ` — currently ${holder.name}`;
   };
@@ -103,7 +95,7 @@ export function DriversPage() {
     // assigning a route that someone else holds silently takes it from them —
     // and their drawer is a different panel nobody is looking at. Name the
     // driver being displaced before doing it.
-    const currentOwner = routeOwners.get(assignRouteId)?.[permanent ? 'permanent' : 'override'];
+    const currentOwner = resolveRouteHolder(routeOwners, assignRouteId, assignMode);
     if (currentOwner && currentOwner.id !== selectedDriver.id) {
       const route = routes.find(r => r.id === assignRouteId);
       const scope = permanent ? 'permanently assigned' : "assigned for today";
