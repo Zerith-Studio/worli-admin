@@ -6,6 +6,7 @@ import { useCallback } from "react"
 import { supabase } from "../lib/supabase"
 import { usePaginatedQuery, NO_MATCHES } from "./usePaginatedQuery"
 import { resolveUserIdsMatching } from "../lib/postgrest"
+import { istToday } from "../utils/formatters"
 
 const SELECT = `
   *,
@@ -60,7 +61,7 @@ export function useSubscriptions() {
       // Fetch active holds for paused subscriptions
       const pausedIds = transformedData.filter(s => s.status === 'paused').map(s => s.id)
       if (pausedIds.length > 0) {
-        const today = new Date().toISOString().split('T')[0]
+        const today = istToday()
         const { data: holdsData } = await supabase
           .from('subscription_holds')
           .select('subscription_id, start_date, end_date')

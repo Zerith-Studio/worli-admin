@@ -5,6 +5,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
+import { istToday, istDate } from '../../utils/formatters';
 import { ProgressBar } from '../ui/ProgressBar';
 import { MiniChart } from '../ui/MiniChart';
 import { LoadingSpinner } from '../ui/LoadingSpinner';
@@ -22,11 +23,7 @@ export function DemandForecastPage() {
       
       try {
         // Get date range for last 7 days
-        const weekDates = Array.from({length: 7}, (_, i) => {
-          const d = new Date();
-          d.setDate(d.getDate() - (6 - i));
-          return d.toISOString().split('T')[0];
-        });
+        const weekDates = Array.from({length: 7}, (_, i) => istDate(i - 6));
 
         // Fetch products
         const { data: productsData } = await supabase
@@ -67,7 +64,7 @@ export function DemandForecastPage() {
         setProductDemand(productDemandData);
 
         // Fetch orders for zone demand (today's orders)
-        const today = new Date().toISOString().split('T')[0];
+        const today = istToday();
         const { data: ordersData } = await supabase
           .from('orders')
           .select(`

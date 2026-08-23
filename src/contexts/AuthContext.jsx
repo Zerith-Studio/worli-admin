@@ -6,17 +6,26 @@
 // No complex ref races, no DB queries in the listener.
 // ============================================
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
+import { deriveAuthLoading } from '../lib/auth-state';
+import { withTimeout } from '../lib/query';
+import { planAuthTransition, checkAdminWithRetry } from '../lib/admin-check';
 
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
-  // null  = still loading
-  // false = loaded, not authenticated
-  // object = loaded, authenticated session
+  // undefined = still loading
+  // null      = loaded, not authenticated
+  // object    = loaded, authenticated session
   const [session, setSession] = useState(undefined);
-  const [isAdmin, setIsAdmin] = useState(false);
+  // null = admin check not yet resolved for the current session
+  const [isAdmin, setIsAdmin] = useState(null);
+  // Only the newest admin check may write. getSession, a SIGNED_IN event and
+  // verifyOTP can each start one, and with the retry budget a stalled check can
+  // still be running ~36s later — long enough to land on top of a good result
+  // and flip a signed-in admin to Access Denied.
+  const checkSeq = useRef(0);
 
   useEffect(() => {
     // 1. Get the current session synchronously from localStorage.
@@ -31,14 +40,11 @@ export function AuthProvider({ children }) {
       (event, s) => {
         console.log('[Auth] event:', event);
         setSession(s ?? null);
-        if (s?.user) {
-          // Only re-check admin on actual sign-in, not silent token refresh.
-          if (event === 'SIGNED_IN' || event === 'USER_UPDATED') {
-            checkAdmin(s.user.id);
-          }
-        } else {
-          setIsAdmin(false);
-        }
+        // Reset isAdmin to null before a re-check so the loading guard covers
+        // the in-flight check; a silent token refresh leaves it untouched.
+        const { setAdmin, recheck } = planAuthTransition(event, !!s?.user);
+        if (setAdmin !== 'keep') setIsAdmin(setAdmin);
+        if (recheck) checkAdmin(s.user.id);
       }
     );
 
@@ -46,16 +52,19 @@ export function AuthProvider({ children }) {
   }, []);
 
   async function checkAdmin(userId) {
-    try {
-      const { data } = await supabase
-        .from('admins')
-        .select('id')
-        .eq('id', userId)
-        .maybeSingle();
-      setIsAdmin(!!data);
-    } catch {
-      setIsAdmin(false);
+    const seq = ++checkSeq.current;
+    // Fail closed only after retries: a transient lookup failure must not lock
+    // a real admin out of the console. withTimeout is what guarantees this
+    // settles at all — isAdmin gates the loading state, so a stalled query
+    // would otherwise hold the app on the loading screen with no way out.
+    const outcome = await checkAdminWithRetry(() =>
+      withTimeout(supabase.from('admins').select('id').eq('id', userId).maybeSingle())
+    );
+    if (seq !== checkSeq.current) return;
+    if (outcome === 'error') {
+      console.error('[Auth] admin check failed after retries; denying');
     }
+    setIsAdmin(outcome === 'admin');
   }
 
   async function sendOTP(phone) {
@@ -71,15 +80,24 @@ export function AuthProvider({ children }) {
     if (error) return { success: false, error: error.message };
     if (!data.user) return { success: false, error: 'Login failed' };
 
-    const { data: adminRow } = await supabase
-      .from('admins')
-      .select('id')
-      .eq('id', data.user.id)
-      .maybeSingle();
+    // Same lookup as checkAdmin, and it needs the same treatment: a failed
+    // query resolves as data: null, which read as a denial and signed a real
+    // admin out on a blip. Joins the same sequence, so the SIGNED_IN listener's
+    // own check cannot resolve later and overwrite this result.
+    const seq = ++checkSeq.current;
+    const outcome = await checkAdminWithRetry(() =>
+      withTimeout(supabase.from('admins').select('id').eq('id', data.user.id).maybeSingle())
+    );
+    if (seq !== checkSeq.current) return { success: outcome === 'admin' };
 
-    if (!adminRow) {
+    if (outcome !== 'admin') {
       await supabase.auth.signOut();
-      return { success: false, error: 'Access denied. You are not an admin.' };
+      return {
+        success: false,
+        error: outcome === 'error'
+          ? 'Could not verify your account. Please try again.'
+          : 'Access denied. You are not an admin.',
+      };
     }
 
     setIsAdmin(true);
@@ -90,8 +108,7 @@ export function AuthProvider({ children }) {
     await supabase.auth.signOut();
   }
 
-  // session === undefined means we're still loading (getSession not yet resolved)
-  const loading = session === undefined;
+  const loading = deriveAuthLoading(session, isAdmin);
 
   return (
     <AuthContext.Provider value={{

@@ -8,6 +8,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { withTimeout } from '../lib/query';
+import { istToday } from '../utils/formatters';
 
 export function useDrivers() {
   const [drivers, setDrivers] = useState([]);
@@ -72,7 +73,7 @@ export function useDrivers() {
 
       // Fetch route assignments per rider: permanent (assigned_date IS NULL)
       // plus today's one-day overrides. Each is tagged so the UI can split them.
-      const today = new Date().toISOString().split('T')[0];
+      const today = istToday();
       const { data: routeAssignments } = await supabase
         .from('rider_routes')
         .select('rider_id, route_id, assigned_date, routes(name, hub_id, hubs(name))')
@@ -214,7 +215,7 @@ export function useDrivers() {
         const { error } = await supabase.rpc('set_route_override', {
           p_route_id: routeId,
           p_rider_id: riderId,
-          p_date: date || new Date().toISOString().split('T')[0],
+          p_date: date || istToday(),
         });
         if (error) throw error;
       }
@@ -236,7 +237,7 @@ export function useDrivers() {
       } else {
         const { error } = await supabase.rpc('remove_route_override', {
           p_route_id: routeId,
-          p_date: date || new Date().toISOString().split('T')[0],
+          p_date: date || istToday(),
         });
         if (error) throw error;
       }

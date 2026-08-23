@@ -5,6 +5,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
+import { istToday } from '../utils/formatters';
 
 export function useBadgeCounts() {
   const [failedOrdersToday, setFailedOrdersToday] = useState(0);
@@ -18,7 +19,7 @@ export function useBadgeCounts() {
   useEffect(() => {
     const fetch = async () => {
       try {
-        const today = new Date().toISOString().split('T')[0];
+        const today = istToday();
         const { count } = await supabase
           .from('orders')
           .select('id', { count: 'exact', head: true })

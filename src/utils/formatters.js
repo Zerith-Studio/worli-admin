@@ -3,6 +3,19 @@
 // Utility functions for formatting
 // ============================================
 
+// en-CA formats as YYYY-MM-DD. IST calendar date, because
+// new Date().toISOString() returns the UTC date, which lags IST by a day
+// between 00:00 and 05:30 IST — the delivery window.
+const IST_DATE = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" });
+
+export function istDate(offsetDays = 0, now = new Date()) {
+  return IST_DATE.format(new Date(now.getTime() + offsetDays * 86400000));
+}
+
+export function istToday(now = new Date()) {
+  return istDate(0, now);
+}
+
 export function formatDate(dateStr) {
   if (!dateStr) return "—";
   const dt = new Date(dateStr);

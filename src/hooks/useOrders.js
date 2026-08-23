@@ -7,6 +7,7 @@ import { supabase } from "../lib/supabase"
 import { throwFunctionError } from "../lib/function-errors"
 import { usePaginatedQuery } from "./usePaginatedQuery"
 import { orLiteral, resolveUserIdsMatching } from "../lib/postgrest"
+import { istToday, istDate } from "../utils/formatters"
 
 const SELECT = `
   *,
@@ -131,7 +132,7 @@ export function useOrders() {
     table: "orders",
     select: SELECT,
     initialFilters: {
-      date: new Date().toISOString().split("T")[0],
+      date: istToday(),
       status: "all",
       search: "",
     },
@@ -206,10 +207,7 @@ export function useOrders() {
   const retryOrder = useCallback(
     async (id, newFailReason) => {
       try {
-        // Get tomorrow's date
-        const tomorrow = new Date()
-        tomorrow.setDate(tomorrow.getDate() + 1)
-        const tomorrowStr = tomorrow.toISOString().split("T")[0]
+        const tomorrowStr = istDate(1)
 
         const updateData = {
           status: "scheduled",

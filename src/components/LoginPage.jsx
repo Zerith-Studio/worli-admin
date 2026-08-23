@@ -5,25 +5,31 @@
 
 import React, { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { authResultError } from '../lib/login-flow';
 
 export function LoginPage() {
   const [phone, setPhone] = useState('');
   const [otp, setOtp] = useState('');
   const [step, setStep] = useState('phone'); // 'phone' | 'otp'
   const [loading, setLoading] = useState(false);
-  const { sendOTP, verifyOTP, error: authError } = useAuth();
+  const [error, setError] = useState(null);
+  const { sendOTP, verifyOTP } = useAuth();
 
   const handleSendOTP = async (e) => {
     e.preventDefault();
     if (!phone || phone.length < 10) return;
 
     setLoading(true);
+    setError(null);
     // Prepend +91 for Indian phone numbers
     const fullPhone = `+91${phone}`;
     const result = await sendOTP(fullPhone);
     setLoading(false);
 
-    if (result.success) {
+    const err = authResultError(result, 'Failed to send OTP');
+    if (err) {
+      setError(err);
+    } else {
       setStep('otp');
     }
   };
@@ -33,14 +39,13 @@ export function LoginPage() {
     if (!otp || otp.length < 6) return;
 
     setLoading(true);
+    setError(null);
     // Prepend +91 for Indian phone numbers
     const fullPhone = `+91${phone}`;
     const result = await verifyOTP(fullPhone, otp);
     setLoading(false);
 
-    if (!result.success) {
-      // Error handled by auth context
-    }
+    setError(authResultError(result, 'Login failed'));
   };
 
   const formatPhone = (value) => {
@@ -71,8 +76,8 @@ export function LoginPage() {
           }
         </div>
 
-        {authError && (
-          <div className="login-error">{authError}</div>
+        {error && (
+          <div className="login-error">{error}</div>
         )}
 
         {step === 'phone' ? (
@@ -125,6 +130,7 @@ export function LoginPage() {
               onClick={() => {
                 setStep('phone');
                 setOtp('');
+                setError(null);
               }}
             >
               Change Phone Number
