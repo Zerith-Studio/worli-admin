@@ -27,14 +27,18 @@ const MAX_ROWS = 100000;
 async function fetchAllPages(makeQuery, label, orderBy = 'id') {
   const rows = [];
   let from = 0;
-  while (rows.length < MAX_ROWS) {
+  for (;;) {
     const { data } = unwrap(label)(await makeQuery().order(orderBy).range(from, from + PAGE - 1));
     const page = data || [];
     rows.push(...page);
     if (page.length === 0) return rows;
     from += page.length;
+    // Checked after the empty-page exit so a day that ends exactly on the cap
+    // still returns instead of throwing.
+    if (rows.length > MAX_ROWS) {
+      throw new Error(`${label}: more than ${MAX_ROWS} rows; refusing to page further`);
+    }
   }
-  throw new Error(`${label}: exceeded ${MAX_ROWS} rows; refusing to page further`);
 }
 
 const headCount = (label) => (res) => unwrap(label)(res).count || 0;

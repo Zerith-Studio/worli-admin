@@ -6,7 +6,7 @@
 // No complex ref races, no DB queries in the listener.
 // ============================================
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { deriveAuthLoading } from '../lib/auth-state';
 import { withTimeout } from '../lib/query';
@@ -21,6 +21,11 @@ export function AuthProvider({ children }) {
   const [session, setSession] = useState(undefined);
   // null = admin check not yet resolved for the current session
   const [isAdmin, setIsAdmin] = useState(null);
+  // Only the newest admin check may write. getSession, a SIGNED_IN event and
+  // verifyOTP can each start one, and with the retry budget a stalled check can
+  // still be running ~36s later — long enough to land on top of a good result
+  // and flip a signed-in admin to Access Denied.
+  const checkSeq = useRef(0);
 
   useEffect(() => {
     // 1. Get the current session synchronously from localStorage.
@@ -47,6 +52,7 @@ export function AuthProvider({ children }) {
   }, []);
 
   async function checkAdmin(userId) {
+    const seq = ++checkSeq.current;
     // Fail closed only after retries: a transient lookup failure must not lock
     // a real admin out of the console. withTimeout is what guarantees this
     // settles at all — isAdmin gates the loading state, so a stalled query
@@ -54,6 +60,7 @@ export function AuthProvider({ children }) {
     const outcome = await checkAdminWithRetry(() =>
       withTimeout(supabase.from('admins').select('id').eq('id', userId).maybeSingle())
     );
+    if (seq !== checkSeq.current) return;
     if (outcome === 'error') {
       console.error('[Auth] admin check failed after retries; denying');
     }
@@ -75,10 +82,13 @@ export function AuthProvider({ children }) {
 
     // Same lookup as checkAdmin, and it needs the same treatment: a failed
     // query resolves as data: null, which read as a denial and signed a real
-    // admin out on a blip.
+    // admin out on a blip. Joins the same sequence, so the SIGNED_IN listener's
+    // own check cannot resolve later and overwrite this result.
+    const seq = ++checkSeq.current;
     const outcome = await checkAdminWithRetry(() =>
       withTimeout(supabase.from('admins').select('id').eq('id', data.user.id).maybeSingle())
     );
+    if (seq !== checkSeq.current) return { success: outcome === 'admin' };
 
     if (outcome !== 'admin') {
       await supabase.auth.signOut();
