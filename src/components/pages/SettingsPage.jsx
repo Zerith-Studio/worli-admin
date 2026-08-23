@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useSettings } from '../../hooks/useSettings';
 import { usePaginatedQuery } from '../../hooks/usePaginatedQuery';
+import { validateShiftConfig } from '../../lib/shift-config';
 import { supabase } from '../../lib/supabase';
 import { Button } from '../ui/Button';
 import { LoadingSpinner } from '../ui/LoadingSpinner';
@@ -43,7 +44,14 @@ export function SettingsPage() {
     setLocalSettings(prev => ({ ...prev, [key]: val }));
   };
 
+  const shiftErrors = validateShiftConfig({
+    start: localSettings.rider_attendance_start || '03:45',
+    end: localSettings.rider_attendance_end || '05:00',
+    lockout: localSettings.rider_lockout_time || '06:45',
+  });
+
   const handleSave = async () => {
+    if (shiftErrors.length) return;
     await updateSettings(localSettings);
   };
 
@@ -200,7 +208,7 @@ export function SettingsPage() {
       </div>
 
       <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
-        <Button variant="primary" onClick={handleSave} disabled={saving}>
+        <Button variant="primary" onClick={handleSave} disabled={saving || shiftErrors.length > 0}>
           {saving ? 'Saving...' : 'Save All Settings'}
         </Button>
         <Button onClick={() => setLocalSettings(settings)}>Discard Changes</Button>
@@ -309,6 +317,9 @@ export function SettingsPage() {
         <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 4 }}>
           Riders must check in between Attendance Start and End. They are locked out after Lockout Time.
         </div>
+        {shiftErrors.map(err => (
+          <div key={err} style={{ fontSize: 12, color: 'var(--red)', marginTop: 6 }}>{err}</div>
+        ))}
       </div>
     </div>
   );
