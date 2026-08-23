@@ -20,9 +20,15 @@ export function buildRouteOwners(drivers) {
 
 // `permanent` looks only at the permanent holder; assigning for today has to
 // consider the permanent owner too, because that is who loses the route.
+// `tenure` is how the holder actually holds it, which is not the mode being
+// applied — taking a route "for today" from someone who holds it permanently
+// must not describe them as holding it for today.
 export function resolveRouteHolder(owners, routeId, mode) {
   const owner = owners.get(routeId);
   if (!owner) return null;
-  const holder = mode === 'permanent' ? owner.permanent : owner.override || owner.permanent;
-  return holder ?? null;
+  if (mode === 'permanent') {
+    return owner.permanent ? { ...owner.permanent, tenure: 'permanent' } : null;
+  }
+  if (owner.override) return { ...owner.override, tenure: 'override' };
+  return owner.permanent ? { ...owner.permanent, tenure: 'permanent' } : null;
 }

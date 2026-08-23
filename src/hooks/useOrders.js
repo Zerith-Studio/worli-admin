@@ -5,6 +5,7 @@
 import { useCallback } from "react"
 import { supabase } from "../lib/supabase"
 import { throwFunctionError } from "../lib/function-errors"
+import { withTimeout } from "../lib/query"
 import { usePaginatedQuery } from "./usePaginatedQuery"
 import { orLiteral, resolveUserIdsMatching } from "../lib/postgrest"
 
@@ -261,13 +262,15 @@ export function useOrders() {
   // of it. Before the per-order migration is applied the assigned_manually
   // filter is itself a 400, which is exactly that case.
   const countRouteOrders = useCallback(async (routeId, date) => {
-    const { count, error } = await supabase
-      .from("orders")
-      .select("id", { count: "exact", head: true })
-      .eq("route_id", routeId)
-      .eq("delivery_date", date)
-      .in("status", ["scheduled", "in_transit"])
-      .eq("assigned_manually", false)
+    const { count, error } = await withTimeout(
+      supabase
+        .from("orders")
+        .select("id", { count: "exact", head: true })
+        .eq("route_id", routeId)
+        .eq("delivery_date", date)
+        .in("status", ["scheduled", "in_transit"])
+        .eq("assigned_manually", false),
+    )
     if (error) await throwFunctionError(error, null)
     if (typeof count !== "number") throw new Error("Route stop count unavailable")
     return count

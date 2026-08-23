@@ -6,7 +6,7 @@
 // - Confirmation dialog before marking delivered
 // ============================================
 
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { useOrders } from '../../hooks/useOrders';
 import { COUNT_FAILED, routeCountMessage, canConfirmRouteReassign } from '../../lib/route-reassign';
 import { useDrivers } from '../../hooks/useDrivers';
@@ -70,6 +70,7 @@ export function OrdersPage() {
   const [assignModal, setAssignModal] = useState(null); // order object
   const [routeModal, setRouteModal] = useState(null);   // order object (for its route)
   const [routeOrderCount, setRouteOrderCount] = useState(null);
+  const routeCountSeq = useRef(0);
 
   // Read through to the refreshed list rather than trusting the pinned copy:
   // every mutation that moves the rider would otherwise have to restate it, and
@@ -191,14 +192,19 @@ export function OrdersPage() {
   };
 
   const openRouteModal = async (order) => {
+    // Cancelling and reopening within one round trip would otherwise let the
+    // first count land in the second modal — and a late success on top of a
+    // failed count re-enables Confirm on a route whose size is unknown.
+    const seq = ++routeCountSeq.current;
     setRouteModal(order);
     setSelectedDriver('');
     setRouteOrderCount(null);
     try {
-      setRouteOrderCount(await countRouteOrders(order.routeId, order.date));
+      const count = await countRouteOrders(order.routeId, order.date);
+      if (seq === routeCountSeq.current) setRouteOrderCount(count);
     } catch (err) {
       console.error('[Orders] route stop count failed:', err);
-      setRouteOrderCount(COUNT_FAILED);
+      if (seq === routeCountSeq.current) setRouteOrderCount(COUNT_FAILED);
     }
   };
 

@@ -98,7 +98,9 @@ export function DriversPage() {
     const currentOwner = resolveRouteHolder(routeOwners, assignRouteId, assignMode);
     if (currentOwner && currentOwner.id !== selectedDriver.id) {
       const route = routes.find(r => r.id === assignRouteId);
-      const scope = permanent ? 'permanently assigned' : "assigned for today";
+      const scope = currentOwner.tenure === 'permanent'
+        ? 'permanently assigned'
+        : 'assigned for today';
       if (!window.confirm(
         `${route?.name || 'This route'} is currently ${scope} to ${currentOwner.name}.\n\n` +
         `Assigning it to ${selectedDriver.name} will remove it from ${currentOwner.name}. Continue?`

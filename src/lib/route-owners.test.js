@@ -33,6 +33,19 @@ describe("resolveRouteHolder", () => {
     expect(resolveRouteHolder(owners, "worli", "permanent")).toBeNull();
   });
 
+  it("reports how the holder actually holds it, not the mode being applied", () => {
+    // Taking a route "for today" from its permanent owner must not tell the
+    // admin it is "assigned for today" to them.
+    expect(resolveRouteHolder(owners, "bhattu", "override")?.tenure).toBe("permanent");
+    expect(resolveRouteHolder(owners, "bhattu", "permanent")?.tenure).toBe("permanent");
+
+    const withBoth = buildRouteOwners([
+      ...DRIVERS,
+      { id: "ravi", name: "Ravi", assignedRoutes: [{ routeId: "bhattu", isPermanent: false }] },
+    ]);
+    expect(resolveRouteHolder(withBoth, "bhattu", "override")?.tenure).toBe("override");
+  });
+
   it("returns null for an unheld route", () => {
     expect(resolveRouteHolder(owners, "nowhere", "override")).toBeNull();
   });
