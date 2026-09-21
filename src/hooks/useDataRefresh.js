@@ -1,10 +1,11 @@
 // ============================================
 // FILE: hooks/useDataRefresh.js
 // Simple polling hook. Calls refreshFn on an interval
-// only when the tab is visible. Clean and minimal.
+// only when the tab is visible and nobody is mid-interaction.
 // ============================================
 
 import { useEffect, useRef } from 'react';
+import { shouldBackgroundRefresh, readRefreshContext } from '../lib/refresh-gate';
 
 export function useDataRefresh(refreshFn, interval = 60000) {
   const fnRef = useRef(refreshFn);
@@ -12,7 +13,8 @@ export function useDataRefresh(refreshFn, interval = 60000) {
 
   useEffect(() => {
     const id = setInterval(() => {
-      if (document.visibilityState === 'visible') {
+      const ctx = readRefreshContext(document, () => window.getSelection?.());
+      if (shouldBackgroundRefresh(ctx)) {
         fnRef.current(true); // true = background refresh (no loading spinner)
       }
     }, interval);

@@ -6,9 +6,21 @@
 // check runs. Returning setAdmin: null on sign-in (rather than leaving the
 // stale value) is what lets deriveAuthLoading keep the app in "loading" while
 // the check is in flight — otherwise a re-login flashes Access Denied.
-export function planAuthTransition(event, hasSession) {
+//
+// sameUser says the incoming session belongs to the user whose admin verdict we
+// already hold. It matters because SIGNED_IN is not only a login: supabase-js
+// registers a visibilitychange handler that calls _recoverAndRefresh(), and its
+// healthy path notifies SIGNED_IN for the session it just read back from
+// storage. So every switch to another tab and back arrives here as a sign-in.
+// Blanking isAdmin for one puts App.jsx into its loading branch, which returns
+// above <Router> and unmounts the whole console — losing any form in progress.
+export function planAuthTransition(event, hasSession, sameUser = false) {
   if (!hasSession) return { setAdmin: false, recheck: false };
   if (event === 'SIGNED_IN' || event === 'USER_UPDATED') {
+    // A known user needs no loading gate; there is nothing to hide behind it.
+    // USER_UPDATED still revalidates, but silently — a metadata edit must not
+    // tear the tree down, and a revoked admin is caught when the check lands.
+    if (sameUser) return { setAdmin: 'keep', recheck: event === 'USER_UPDATED' };
     return { setAdmin: null, recheck: true };
   }
   return { setAdmin: 'keep', recheck: false };

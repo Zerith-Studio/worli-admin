@@ -5,7 +5,6 @@
 
 import React from 'react';
 import { useDashboardStats } from '../../hooks/useDashboardStats';
-import { useDataRefresh } from '../../hooks/useDataRefresh';
 import { ProgressBar } from '../ui/ProgressBar';
 import { MiniChart } from '../ui/MiniChart';
 import { StatusBadge } from '../ui/StatusBadge';
@@ -30,10 +29,7 @@ export function DashboardPage({ onNav }) {
     minWalletBalance,
     loading,
     error,
-    refresh,
   } = useDashboardStats();
-
-  useDataRefresh(refresh, 60000, true);
 
   if (loading) {
     return (
