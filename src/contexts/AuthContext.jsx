@@ -26,6 +26,11 @@ export function AuthProvider({ children }) {
   // still be running ~36s later — long enough to land on top of a good result
   // and flip a signed-in admin to Access Denied.
   const checkSeq = useRef(0);
+  // The user id the current isAdmin value describes. Written only where isAdmin
+  // is, so "we have a verdict for this user" and "this ref matches" are the same
+  // statement. It is what tells a real login apart from a tab regaining focus,
+  // both of which arrive as SIGNED_IN.
+  const verifiedUserId = useRef(null);
 
   useEffect(() => {
     // 1. Get the current session synchronously from localStorage.
@@ -40,9 +45,12 @@ export function AuthProvider({ children }) {
       (event, s) => {
         console.log('[Auth] event:', event);
         setSession(s ?? null);
+        if (!s?.user) verifiedUserId.current = null;
         // Reset isAdmin to null before a re-check so the loading guard covers
-        // the in-flight check; a silent token refresh leaves it untouched.
-        const { setAdmin, recheck } = planAuthTransition(event, !!s?.user);
+        // the in-flight check; a silent token refresh leaves it untouched, and
+        // so does a SIGNED_IN for the user we have already verified.
+        const sameUser = !!s?.user && s.user.id === verifiedUserId.current;
+        const { setAdmin, recheck } = planAuthTransition(event, !!s?.user, sameUser);
         if (setAdmin !== 'keep') setIsAdmin(setAdmin);
         if (recheck) checkAdmin(s.user.id);
       }
@@ -64,6 +72,7 @@ export function AuthProvider({ children }) {
     if (outcome === 'error') {
       console.error('[Auth] admin check failed after retries; denying');
     }
+    verifiedUserId.current = userId;
     setIsAdmin(outcome === 'admin');
   }
 
@@ -100,6 +109,7 @@ export function AuthProvider({ children }) {
       };
     }
 
+    verifiedUserId.current = data.user.id;
     setIsAdmin(true);
     return { success: true };
   }
