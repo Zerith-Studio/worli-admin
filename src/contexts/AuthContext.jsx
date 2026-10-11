@@ -31,6 +31,11 @@ export function AuthProvider({ children }) {
   // statement. It is what tells a real login apart from a tab regaining focus,
   // both of which arrive as SIGNED_IN.
   const verifiedUserId = useRef(null);
+  // A refused login has to outlive LoginPage. verifyOtp emits SIGNED_IN before
+  // the admin check settles, which puts App.jsx on its loading screen and
+  // unmounts LoginPage — so an error held in its own state was gone by the time
+  // the sign-out brought it back, and a non-admin just saw the phone step again.
+  const [loginError, setLoginError] = useState(null);
 
   useEffect(() => {
     // 1. Get the current session synchronously from localStorage.
@@ -100,13 +105,12 @@ export function AuthProvider({ children }) {
     if (seq !== checkSeq.current) return { success: outcome === 'admin' };
 
     if (outcome !== 'admin') {
+      const error = outcome === 'error'
+        ? 'Could not verify your account. Please try again.'
+        : 'Access denied. You are not an admin.';
+      setLoginError(error);
       await supabase.auth.signOut();
-      return {
-        success: false,
-        error: outcome === 'error'
-          ? 'Could not verify your account. Please try again.'
-          : 'Access denied. You are not an admin.',
-      };
+      return { success: false, error };
     }
 
     verifiedUserId.current = data.user.id;
@@ -126,6 +130,8 @@ export function AuthProvider({ children }) {
       user: session?.user ?? null,
       isAdmin,
       loading,
+      loginError,
+      clearLoginError: () => setLoginError(null),
       sendOTP,
       verifyOTP,
       logout,

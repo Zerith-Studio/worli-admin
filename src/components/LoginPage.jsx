@@ -13,7 +13,10 @@ export function LoginPage() {
   const [step, setStep] = useState('phone'); // 'phone' | 'otp'
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const { sendOTP, verifyOTP } = useAuth();
+  const { sendOTP, verifyOTP, loginError, clearLoginError } = useAuth();
+  // A refused login remounts this page, so its reason lives in the context and
+  // stays up until the next attempt starts.
+  const shownError = error || loginError;
 
   const handleSendOTP = async (e) => {
     e.preventDefault();
@@ -21,6 +24,7 @@ export function LoginPage() {
 
     setLoading(true);
     setError(null);
+    clearLoginError();
     // Prepend +91 for Indian phone numbers
     const fullPhone = `+91${phone}`;
     const result = await sendOTP(fullPhone);
@@ -76,8 +80,8 @@ export function LoginPage() {
           }
         </div>
 
-        {error && (
-          <div className="login-error">{error}</div>
+        {shownError && (
+          <div className="login-error">{shownError}</div>
         )}
 
         {step === 'phone' ? (
